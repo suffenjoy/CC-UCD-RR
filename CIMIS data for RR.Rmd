@@ -1,0 +1,39 @@
+#preparation
+```{r}
+library(Rcimis)
+
+cimis_d1 <- getDists(lat = 38.5439, -121.8701, n = 4)
+
+```
+
+#from winters station (139)
+```{r}
+winters_weather_2013 <- CIMISweather(startDate = "2013-01-01", endDate = "2013-12-31", targets = 139, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+winters_weather_2014 <- CIMISweather(startDate = "2014-01-01", endDate = "2014-12-31", targets = 139, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+winters_weather_2015 <- CIMISweather(startDate = "2015-01-01", endDate = "2015-12-31", targets = 139, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+winters_weather_2016 <- CIMISweather(startDate = "2016-01-01", endDate = "2016-12-31", targets = 139, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+winters_weather_2017 <- CIMISweather(startDate = "2017-01-01", endDate = "2017-12-31", targets = 139, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+winters_weather_2018 <- CIMISweather(startDate = "2018-01-01", endDate = "2018-10-01", targets = 139, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+#combine all 
+winters_weather <- rbind(winters_weather_2013, winters_weather_2014, winters_weather_2015, winters_weather_2016, winters_weather_2017, winters_weather_2018)
+
+#output 
+path_weather <- "C:/Users/tangz/Box Sync/CC_UCD_RR/Weather"
+write.csv(winters_weather, file.path(path_weather, "cimis_winters_20130101_20181001.csv"), row.names = FALSE)
+```
+
+#from Davis station (6)
+```{r}
+davis_weather_2013 <- CIMISweather(startDate = "2013-01-01", endDate = "2013-12-31", targets = 6, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+davis_weather_2014 <- CIMISweather(startDate = "2014-01-01", endDate = "2014-12-31", targets = 6, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+davis_weather_2015 <- CIMISweather(startDate = "2015-01-01", endDate = "2015-12-31", targets = 6, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+davis_weather_2016 <- CIMISweather(startDate = "2016-01-01", endDate = "2016-12-31", targets = 6, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+davis_weather_2017 <- CIMISweather(startDate = "2017-01-01", endDate = "2017-12-31", targets = 6, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+davis_weather_2018 <- CIMISweather(startDate = "2018-01-01", endDate = "2018-10-01", targets = 6, appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+#combine all 
+davis_weather <- rbind(davis_weather_2013, davis_weather_2014, davis_weather_2015, davis_weather_2016, davis_weather_2017, davis_weather_2018)
+#output 
+write.csv(davis_weather, file.path(path_weather, "davis_winters_20130101_20181001.csv"), row.names = FALSE)
+
+```
+
