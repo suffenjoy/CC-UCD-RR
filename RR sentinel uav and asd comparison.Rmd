@@ -1,0 +1,270 @@
+---
+title: "RR sentinel extraction"
+author: "Zhehan"
+date: "September 12, 2018"
+output: html_document
+---
+
+#package
+```{r}
+library(raster)
+library(spectrolab)
+```
+
+#read UAV data
+```{r}
+path_uav <- "C:/Users/zt92/Box Sync/CC_UCD_RR/Processed_UAV_images"
+uav_rr_090718 <- raster::brick(file.path(path_uav, "rr_whole_090718_stack.tif"))
+names(uav_rr_090718) <- c("blue","green","red","rededge","nir","ndvi")
+
+#Remove values == -10000, which are actually the NAs
+plot(uav_rr_090718)
+```
+
+#read shapefile
+```{r}
+path_shp <- "C:/Users/zt92/Box Sync/CC_UCD_RR/Shapefiles"
+pixeltargets <- shapefile(file.path(path_shp, "PixelTargetst.shp"))
+fieldbound <- shapefile(file.path(path_shp, "CenturyExp_Fields_WGS84.shp"))
+```
+
+#extract data from UAV 
+```{r}
+pixeltargets$Plot <- substr(pixeltargets$PlotID, start = 1, stop = 3)
+pixel_uav <- raster::extract(uav_rr_090718, pixeltargets, method = 'simple', buffer = 10, na.rm = TRUE, df = TRUE, fun = mean)
+View(pixel_uav)
+pixel_uav$plot <- pixeltargets$Plot
+pixel_uav$plotid <- pixeltargets$PlotID
+
+plot_uav <- aggregate(pixel_uav[2:7], list("plot"=pixel_uav$plot), mean)
+```
+
+
+#read sentinel data
+```{r}
+#10m resolution images
+path_sen10 <- 'C:/Users/zt92/Box Sync/CC_UCD_RR/Sentinel/S2B_MSIL2A_20180907T184909_N0206_R113_T10SEH_20180907T224321.SAFE/GRANULE/L2A_T10SEH_A007861_20180907T185708/IMG_DATA/R10m'
+sen_rr_090718_b02_10 <- raster(file.path(path_sen10, "T10SEH_20180907T184909_B02_10m.jp2"))
+sen_rr_090718_b03_10 <- raster(file.path(path_sen10, "T10SEH_20180907T184909_B03_10m.jp2"))
+sen_rr_090718_b04_10 <- raster(file.path(path_sen10, "T10SEH_20180907T184909_B04_10m.jp2"))
+sen_rr_090718_b08_10 <- raster(file.path(path_sen10, "T10SEH_20180907T184909_B08_10m.jp2"))
+
+#20m resolution images
+path_sen20 <- 'C:/Users/zt92/Box Sync/CC_UCD_RR/Sentinel/S2B_MSIL2A_20180907T184909_N0206_R113_T10SEH_20180907T224321.SAFE/GRANULE/L2A_T10SEH_A007861_20180907T185708/IMG_DATA/R20m'
+sen_rr_090718_b05_20 <- raster(file.path(path_sen20, "T10SEH_20180907T184909_B05_20m.jp2"))
+sen_rr_090718_b06_20 <- raster(file.path(path_sen20, "T10SEH_20180907T184909_B06_20m.jp2"))
+sen_rr_090718_b07_20 <- raster(file.path(path_sen20, "T10SEH_20180907T184909_B07_20m.jp2"))
+sen_rr_090718_b08A_20 <- raster(file.path(path_sen20, "T10SEH_20180907T184909_B8A_20m.jp2"))
+sen_rr_090718_b11_20 <- raster(file.path(path_sen20, "T10SEH_20180907T184909_B11_20m.jp2"))
+sen_rr_090718_b12_20 <- raster(file.path(path_sen20, "T10SEH_20180907T184909_B12_20m.jp2"))
+
+#sen_rr_090718_b02_20 <- resample(sen_rr_090718_b02_10, sen_rr_090718_b05_20)
+#sen_rr_090718_b03_20 <- resample(sen_rr_090718_b03_10, sen_rr_090718_b05_20)
+#sen_rr_090718_b04_20 <- resample(sen_rr_090718_b04_10, sen_rr_090718_b05_20)
+#sen_rr_090718_b08_20 <- resample(sen_rr_090718_b08_10, sen_rr_090718_b05_20)
+
+#stack them together
+sen_rr_090718_10 <- raster::brick(sen_rr_090718_b02_10, 
+                                  sen_rr_090718_b03_10,
+                                  sen_rr_090718_b04_10,
+                                  sen_rr_090718_b08_10)
+names(sen_rr_090718_10) <- c("blue","green","red","nir")
+sen_rr_090718_20 <- raster::brick(sen_rr_090718_b05_20,
+                                  sen_rr_090718_b06_20,
+                                  sen_rr_090718_b07_20,
+                                  sen_rr_090718_b08A_20,
+                                  sen_rr_090718_b11_20,
+                                  sen_rr_090718_b12_20)
+names(sen_rr_090718_20) <- c("rededge1","rededge2","rededge3","nir2","swir1","swir2")
+
+#read sentinel 
+path_sen <- "C:/Users/zt92/Box Sync/CC_UCD_RR/Sentinel"
+sen_rr_090718 <- raster::brick(file.path(path_sen, "T10SEH_20180907T1849091_Clip2_1.tif"))
+names(sen_rr_090718) <- c("blue","green","red", "rededge1","rededge2","rededge3","nir","nir2","swir1","swir2")
+
+
+```
+
+#extract data from sentinel data
+```{r}
+pixel_sen10 <- raster::extract(sen_rr_090718_10, pixeltargets, method = 'bilinear', na.rm = TRUE, df = TRUE, fun = mean)
+pixel_sen10[,-1] <- pixel_sen10[,-1]/10000
+
+pixel_sen20 <- raster::extract(sen_rr_090718_20, pixeltargets, method = 'simple', na.rm = TRUE, df = TRUE, fun = mean)
+pixel_sen20[,-1] <- pixel_sen20[,-1]/10000
+
+#combine 10 and 20
+pixel_sen <- raster::extract(sen_rr_090718, pixeltargets, method = "simple", na.rm = TRUE, df = TRUE, fun = mean)
+pixel_sen[,-1] <- pixel_sen[,-1]/10000
+pixel_sen$plot <- pixeltargets$Plot
+pixel_sen$plotid <- pixeltargets$PlotID
+
+
+
+#aggregate by plot 
+plot_sen <- aggregate(pixel_sen[2:11], list("plot"=pixel_sen$plot), mean)
+
+
+```
+
+#output the dfs
+```{r}
+path_df <- "C:/Users/zt92/Box Sync/CC_UCD_RR/Dataframes"
+write.csv(pixel_sen, file.path(path_df, "pixel_sen.csv"), row.names = FALSE)
+write.csv(pixel_uav, file.path(path_df, "pixel_uav.csv"), row.names = FALSE)
+write.csv(plot_sen, file.path(path_df, "plot_sen.csv"), row.names = FALSE)
+write.csv(plot_uav, file.path(path_df, "plot_uav.csv"), row.names = FALSE)
+
+```
+
+#draw plots to compare the UAV data and Sentinel data 
+```{r}
+wavelen_uav <- c(475, 560, 668, 717, 840)
+wavelen_sen <- c(497, 560, 665, 704, 740, 783, 835, 865, 1614, 2202)
+
+#plot average
+par(mfrow = c(2,3))
+for(i in 1:5){
+  plot(x = wavelen_sen, y = plot_sen[i,2:11], type = 'o', xlab = "wavelenth", ylab = "reflectance", ylim = c(0,0.40), col = 'blue', main = paste("Plot",plot_sen$plot[i], sep = " "), pch = 20)
+  lines(x = wavelen_uav, y = plot_uav[i,2:6], type = 'o', col = 'red', pch = 20)
+
+}
+
+#point only 
+pixel_uav_sort <- pixel_uav[order(pixel_uav$plotid),]
+pixel_sen_sort <- pixel_sen[order(pixel_sen$plotid),]
+par(mfrow = c(4,5), mar = c(2,2,2,2))
+for(i in 1:19){
+  plot(x = wavelen_sen, y = pixel_sen_sort[i, 2:11], type = "o", ylim = c(0,0.40), col = "blue", main = paste("Pixel", pixel_sen_sort$plotid[i], sep = " "), pch = 20, xlab = "", ylab = "")
+  lines(x = wavelen_uav, y = pixel_uav_sort[i, 2:6], type = "o", col = "red", pch = 20)
+}
+dev.off()
+
+#corn only
+par(mfrow = c(1,1))
+plot(x = wavelen_sen, y = plot_sen[1, 2:11], type = "o", col = "blue", xlab = "wavelength", ylab = "reflectance", ylim = c(0,0.35), pch = 20, main = "Maize Sentinel-2")
+lines(x = wavelen_sen, y = plot_sen[4, 2:11], type = "o", col = "red", pch = 20)
+lines(x = wavelen_sen, y = plot_sen[5, 2:11], type = "o", col = "orange", pch = 20)
+legend("bottomright", legend = c("1-4","5-5","7-8"), col = c("blue","red","orange"), pch = 20)
+
+
+plot(x = wavelen_uav, y = plot_uav[1, 2:6], type = "o", col = "blue", xlab = "wavelength", ylab = "reflectance", main = "Maize UAV", pch = 20, ylim = c(0,0.35))
+lines(x = wavelen_uav, y = plot_uav[4, 2:6], type = "o", col = "red", pch = 20)
+lines(x = wavelen_uav, y = plot_uav[5, 2:6], type = "o", col = "orange", pch = 20)
+legend("bottomright", legend = c("1-4","5-5","7-8"), col = c("blue","red","orange"), pch = 20)
+
+```
+
+#Read 15m AGL UAV
+```{r}
+path_uav <- "C:/Users/zt92/Box Sync/CC_UCD_RR/Processed_UAV_images"
+uav_43_090718 <- raster::brick(file.path(path_uav, "rr_4-3_090718_stack.tif"))
+uav_52_090718 <- raster::brick(file.path(path_uav, "rr_5-2_090718_stack.tif"))
+names(uav_43_090718) <- c("blue","green","red","rededge","nir","ndvi")
+names(uav_52_090718) <- c("blue","green","red","rededge","nir","ndvi")
+```
+
+#extract data from 15m UAV 
+```{r}
+#4-3
+pixel_uav_43 <- raster::extract(uav_43_090718, pixeltargets[pixeltargets$Plot == "4-3",], method = "simple", buffer = 10, na.rm = TRUE, df = TRUE, fun = mean)
+pixel_uav_43$plotid <- pixeltargets[pixeltargets$Plot == "4-3",]$PlotID
+pixel_uav_43$plot <- "4-3"
+#plot average
+plot_uav_43 <- aggregate(pixel_uav_43[2:7], list("plot"=pixel_uav_43$plot), mean)
+
+#5-2
+pixel_uav_52 <- raster::extract(uav_52_090718, pixeltargets[pixeltargets$Plot == "5-2",], method = "simple", buffer = 10, na.rm = TRUE, df = TRUE, fun = mean)
+pixel_uav_52$plotid <- pixeltargets[pixeltargets$Plot == "5-2",]$PlotID
+pixel_uav_52$plot <- "5-2"
+#plot average
+plot_uav_52 <- aggregate(pixel_uav_52[2:7], list("plot"=pixel_uav_52$plot), mean)
+
+```
+
+#compare 15m UAV with 60m UAV 
+```{r}
+#4-3
+##pixel
+par(mfrow = c(2,2))
+for(i in 1:4){
+  plot(x = wavelen_uav, y = pixel_uav_43[i, 2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = paste("Pixel", pixel_uav_43$plotid[i], sep = " "), pch = 20, ylim = c(0,0.40))
+  lines(x = wavelen_uav, y = pixel_uav[pixel_uav$plot == "4-3", 2:6][i,], col = "blue", pch = 20, type = "o")
+  lines(x = wavelen_sen, y = pixel_sen[pixel_sen$plot == "4-3", 2:11][i,], col = "red", pch = 20, type = "o")
+}
+#plot average
+par(mfrow = c(1,1))
+plot(x = wavelen_uav, y = plot_uav_43[2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = "Plot 4-3", pch = 20, ylim = c(0,0.40))
+lines(x = wavelen_uav, y = plot_uav[plot_uav$plot == "4-3",2:6], col = "blue", pch = 20, type = "o")
+lines(x = wavelen_sen, y = plot_sen[plot_sen$plot == "4-3", 2:11], col = "red", pch = 20, type = "o")
+legend("topleft", legend = c("UAV at 15m","UAV at 60m","Sentinel-2"), col = c("green","blue","red"), pch = 20)
+
+#5-2
+##pixel
+par(mfrow = c(2,2))
+for(i in 1:3){
+  plot(x = wavelen_uav, y = pixel_uav_52[i, 2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = paste("Pixel", pixel_uav_52$plotid[i], sep = " "), pch = 20, ylim = c(0,0.40))
+  lines(x = wavelen_uav, y = pixel_uav[pixel_uav$plot == "5-2", 2:6][i,], col = "blue", pch = 20, type = "o")
+  lines(x = wavelen_sen, y = pixel_sen[pixel_sen$plot == "5-2", 2:11][i,], col = "red", pch = 20, type = "o")
+}
+#plot average
+par(mfrow = c(1,1))
+plot(x = wavelen_uav, y = plot_uav_52[2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = "Plot 5-2", pch = 20, ylim = c(0,0.40))
+lines(x = wavelen_uav, y = plot_uav[plot_uav$plot == "5-2",2:6], col = "blue", pch = 20, type = "o")
+lines(x = wavelen_sen, y = plot_sen[plot_sen$plot == "5-2", 2:11], col = "red", pch = 20, type = "o")
+legend("topleft", legend = c("UAV at 15m","UAV at 60m","Sentinel-2"), col = c("green","blue","red"), pch = 20)
+
+```
+
+#Read asd data
+```{r}
+path_asd43 <- "C:/Users/zt92/Box Sync/CC_UCD_RR/StubbleSpectra/Stubble43_090718"
+path_asd52 <- "C:/Users/zt92/Box Sync/CC_UCD_RR/StubbleSpectra/Stubble52_090718"
+path_test <- "C:/Users/zt92/Downloads/Stubble52_090718"
+#reflectance 
+spectra_43 <- read_spectra(path_asd43, format = "asd", exclude_if_matches = "1-4")
+spectra_52 <- read_spectra(path_asd52, format  = "asd", exclude_if_matches = "1-4")
+#wavelength
+wavelen <- wavelengths(spectra_43)
+
+#43
+##big data frame 
+df_asd43 <- data.frame("name" = rep(names(spectra_43), each = length(wavelen)), "wavelength" = rep(wavelen, length(names(spectra_43))), "reflectance" = as.vector(t(reflectance(spectra_43))))
+apply(spectra_43, 1, mean)
+##remove the first and last 
+df_asd43 <- df_asd43[!df_asd43$name%in% c("wr4-300000","wr4-300031"),]
+
+View(df_asd43)
+##block average
+ave_asd43 <- aggregate(df_asd43$reflectance, by = list(df_asd43$wavelength), FUN = mean)
+names(ave_asd43) <- c("wavelength","reflecntace")
+#plot 
+plot(ave_asd43$wavelength, ave_asd43$reflecntace, type ="l")
+
+#52
+##big data frame 
+df_asd52 <- data.frame("name" = rep(names(spectra_52), each = length(wavelen)), "wavelength" = rep(wavelen, length(names(spectra_52))), "reflectance" = as.vector(t(reflectance(spectra_52))))
+View(df_asd52)
+##block average
+ave_asd52 <- aggregate(df_asd52$reflectance, by = list(df_asd52$wavelength), FUN = mean)
+names(ave_asd52) <- c("wavelength","reflecntace")
+plot(ave_asd52$wavelength, ave_asd52$reflecntace, type = "l")
+```
+
+#plot ASD, UAV and Sentinel-2 data
+```{r}
+par(mfrow = c(1,1))
+plot(x = ave_asd43$wavelength, y = ave_asd43$reflecntace, type = 'l', col = "orange", xlab = "wavelength", ylab = "reflectance", main = "Plot 4-3", ylim = c(0,1.0))
+lines(x = wavelen_uav, y = plot_uav_43[2:6], type = "o", col = "green3",pch = 20)
+lines(x = wavelen_uav, y = plot_uav[plot_uav$plot == "4-3",2:6], col = "blue", pch = 20, type = "o")
+lines(x = wavelen_sen, y = plot_sen[plot_sen$plot == "4-3", 2:11], col = "red", pch = 20, type = "o")
+legend("topleft", legend = c("ASD","UAV at 15m","UAV at 60m","Sentinel-2"), col = c("orange","green3","blue","red"), pch = 20)
+
+
+plot(x = wavelen_uav, y = plot_uav_43[2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = "Plot 4-3", pch = 20, ylim = c(0,0.40))
+lines(x = wavelen_uav, y = plot_uav[plot_uav$plot == "4-3",2:6], col = "blue", pch = 20, type = "o")
+lines(x = wavelen_sen, y = plot_sen[plot_sen$plot == "4-3", 2:11], col = "red", pch = 20, type = "o")
+legend("topleft", legend = c("UAV at 15m","UAV at 60m","Sentinel-2"), col = c("green","blue","red"), pch = 20)
+
+```
+
