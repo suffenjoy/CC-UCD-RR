@@ -1,0 +1,697 @@
+---
+title: "Extract VIs from AVIRIS"
+author: "Zhehan"
+date: "January 17, 2019"
+output: html_document
+---
+
+#package
+```{r}
+library(raster)
+library(ggplot2)
+library(rgeos)
+library(reshape2)
+library(tidyr)
+library(corrplot)
+```
+
+#read aviris image
+```{r}
+path_vi <- "Z:/CC_UCD_atRR/data2/AVIRIS_VI"
+list.files(path_vi)
+vi_list <- as.list(list.files(path_vi))
+
+#130410
+aviris_vi_130410 <- raster::brick(file.path(path_vi, 'aviris_vi_130410.tif'))
+names(aviris_vi_130410) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+#130607
+aviris_vi_130607 <- raster::brick(file.path(path_vi, 'aviris_vi_130607.tif'))
+names(aviris_vi_130607) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+#130803
+aviris_vi_130803 <- raster::brick(file.path(path_vi, 'aviris_vi_130803.tif'))
+names(aviris_vi_130803) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+#140418
+aviris_vi_140418 <- raster::brick(file.path(path_vi, 'aviris_vi_140418.tif'))
+names(aviris_vi_140418) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+#140507
+aviris_vi_140507 <- raster::brick(file.path(path_vi, 'aviris_vi_140507.tif'))
+names(aviris_vi_140507) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+#140606
+aviris_vi_140606 <- raster::brick(file.path(path_vi, 'aviris_vi_140606.tif'))
+names(aviris_vi_140606) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+#141124
+aviris_vi_141124 <- raster::brick(file.path(path_vi, 'aviris_vi_141124.tif'))
+names(aviris_vi_141124) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+#150430
+aviris_vi_150430 <- raster::brick(file.path(path_vi, 'aviris_vi_150430.tif'))
+names(aviris_vi_150430) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+#150611
+aviris_vi_150611 <- raster::brick(file.path(path_vi, 'aviris_vi_150611.tif'))
+names(aviris_vi_150611) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+#160620
+aviris_vi_160620 <- raster::brick(file.path(path_vi, 'aviris_vi_160620.tif'))
+names(aviris_vi_160620) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+```
+
+#read data of block treatment
+```{r}
+#the data of treatment and yield
+path_shp_RR <- "Z:/CC_UCD_atRR/data2/BNDs/RR_CE_Shps_2013toPresent"
+##2013
+field_2013 <- as.data.frame(shapefile(file.path(path_shp_RR, "CE_TMW_2013.shp")))
+field_2013 <- field_2013[,c("FieldID","year","block","system_cod","irrigation","cash_crop_","cash_cro_1", "cash_cro_2", "maize_mach", "maize_stov", "tomato_mac", "tomato_gre", "tomato_vin")]
+field_2013$tomato_gre <- as.numeric(field_2013$tomato_gre)
+str(field_2013)
+##2014
+field_2014 <- as.data.frame(shapefile(file.path(path_shp_RR, "CE_TMW_2014.shp")))
+field_2014 <- field_2014[,c("FieldID","year","block","system_cod","irrigation","cash_crop_","cash_cro_1", "cash_cro_2", "maize_mach", "maize_stov", "tomato_mac", "tomato_gre", "tomato_vin")]
+str(field_2014)
+##2015
+field_2015 <- as.data.frame(shapefile(file.path(path_shp_RR, "CE_TMW_2015.shp")))
+field_2015 <- field_2015[,c("FieldID","year","block","system_cod","irrigation","cash_crop_","cash_cro_1", "cash_cro_2", "maize_mach", "maize_stov", "tomato_mac", "tomato_gre", "tomato_vin")]
+field_2015$tomato_gre <- as.numeric(field_2015$tomato_gre)
+str(field_2015)
+##2016
+field_2016 <- as.data.frame(shapefile(file.path(path_shp_RR, "CE_TMW_2016.shp")))
+field_2016 <- field_2016[,c("FieldID","year","block","system_cod","irrigation","cash_crop_","cash_cro_1", "cash_cro_2", "maize_mach", "maize_stov", "tomato_mac", "tomato_gre", "tomato_vin")]
+str(field_2016)
+```
+
+
+#read rotated (adjusted) shapefiles
+```{r}
+path_shp <- "Z:/CC_UCD_atRR/data2/BNDs/ToRotate"
+shp_list <- as.list(list.files(path_shp, pattern = ".shp"))
+
+#130410
+shp_130410 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_130410.shp"))
+##Calculate the centroid
+cen_130410 <- SpatialPointsDataFrame(gCentroid(shp_130410, byid = TRUE), shp_130410@data, match.ID = FALSE)
+plot(cen_130410)
+##add a 10m buffer 
+cenbuff_130410 <- SpatialPolygonsDataFrame(gBuffer(cen_130410, byid = TRUE, width = 10), shp_130410@data, match.ID = FALSE)
+
+#130607
+shp_130607 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_130607.shp"))
+##Calculate the centroid
+cen_130607 <- SpatialPointsDataFrame(gCentroid(shp_130607, byid = TRUE), shp_130607@data, match.ID = FALSE)
+plot(cen_130607)
+##add a 10m buffer 
+cenbuff_130607 <- SpatialPolygonsDataFrame(gBuffer(cen_130607, byid = TRUE, width = 10), shp_130607@data, match.ID = FALSE)
+
+#130803
+shp_130803 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_130803.shp"))
+##Calculate the centroid
+cen_130803 <- SpatialPointsDataFrame(gCentroid(shp_130803, byid = TRUE), shp_130803@data, match.ID = FALSE)
+plot(cen_130803)
+##add a 10m buffer 
+cenbuff_130803 <- SpatialPolygonsDataFrame(gBuffer(cen_130803, byid = TRUE, width = 10), shp_130803@data, match.ID = FALSE)
+
+#140418
+shp_140418 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_140418.shp"))
+##Calculate the centroid
+cen_140418 <- SpatialPointsDataFrame(gCentroid(shp_140418, byid = TRUE), shp_140418@data, match.ID = FALSE)
+plot(cen_140418)
+##add a 10m buffer 
+cenbuff_140418 <- SpatialPolygonsDataFrame(gBuffer(cen_140418, byid = TRUE, width = 10), shp_140418@data, match.ID = FALSE)
+
+#140507
+shp_140507 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_140507.shp"))
+##Calculate the centroid
+cen_140507 <- SpatialPointsDataFrame(gCentroid(shp_140507, byid = TRUE), shp_140507@data, match.ID = FALSE)
+plot(cen_140507)
+##add a 10m buffer 
+cenbuff_140507 <- SpatialPolygonsDataFrame(gBuffer(cen_140507, byid = TRUE, width = 10), shp_140507@data, match.ID = FALSE)
+
+#140606
+shp_140606 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_140606.shp"))
+##Calculate the centroid
+cen_140606 <- SpatialPointsDataFrame(gCentroid(shp_140606, byid = TRUE), shp_140606@data, match.ID = FALSE)
+plot(cen_140606)
+##add a 10m buffer 
+cenbuff_140606 <- SpatialPolygonsDataFrame(gBuffer(cen_140606, byid = TRUE, width = 10), shp_140606@data, match.ID = FALSE)
+
+#141124
+shp_141124 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_141124.shp"))
+##Calculate the centroid
+cen_141124 <- SpatialPointsDataFrame(gCentroid(shp_141124, byid = TRUE), shp_141124@data, match.ID = FALSE)
+plot(cen_141124)
+##add a 10m buffer 
+cenbuff_141124 <- SpatialPolygonsDataFrame(gBuffer(cen_141124, byid = TRUE, width = 10), shp_141124@data, match.ID = FALSE)
+
+#150430
+shp_150430 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_150430.shp"))
+##Calculate the centroid
+cen_150430 <- SpatialPointsDataFrame(gCentroid(shp_150430, byid = TRUE), shp_150430@data, match.ID = FALSE)
+plot(cen_150430)
+##add a 10m buffer 
+cenbuff_150430 <- SpatialPolygonsDataFrame(gBuffer(cen_150430, byid = TRUE, width = 10), shp_150430@data, match.ID = FALSE)
+
+#150611
+shp_150611 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_150611.shp"))
+##Calculate the centroid
+cen_150611 <- SpatialPointsDataFrame(gCentroid(shp_150611, byid = TRUE), shp_150611@data, match.ID = FALSE)
+plot(cen_150611)
+##add a 10m buffer 
+cenbuff_150611 <- SpatialPolygonsDataFrame(gBuffer(cen_150611, byid = TRUE, width = 10), shp_150611@data, match.ID = FALSE)
+
+#160620
+shp_160620 <- shapefile(file.path(path_shp, "CE_FieldBNDS_ManRotate_160620.shp"))
+##Calculate the centroid
+cen_160620 <- SpatialPointsDataFrame(gCentroid(shp_160620, byid = TRUE), shp_160620@data, match.ID = FALSE)
+plot(cen_160620)
+##add a 10m buffer 
+cenbuff_160620 <- SpatialPolygonsDataFrame(gBuffer(cen_160620, byid = TRUE, width = 10), shp_160620@data, match.ID = FALSE)
+
+
+#plot(cenbuff_130410)
+#plot(cenbuff_130410[cenbuff_130410$FieldID=="1-1",], add  = TRUE, col = 'red')
+
+plot(aviris_vi_130410$NDVI)
+plot(shp_130410, add= TRUE)
+plot(cenbuff_130410, add  = TRUE)
+```
+
+
+#extract values for individual block 
+```{r}
+#130410
+##Extract NDVI
+NDVI_130410 <- raster::extract(aviris_vi_130410$NDVI, cenbuff_130410, small = TRUE)
+NDWI_130410 <- raster::extract(aviris_vi_130410$NDWI, cenbuff_130410, small = TRUE)
+RVSI_130410 <- raster::extract(aviris_vi_130410$RVSI, cenbuff_130410, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_130410) <- cenbuff_130410$FieldID
+NDVI_130410 <- melt(NDVI_130410, value.name = "NDVI")
+names(NDVI_130410)[2] <- "FieldID"
+names(NDWI_130410) <- cenbuff_130410$FieldID
+NDWI_130410 <- melt(NDWI_130410, value.name = "NDWI")
+names(NDWI_130410)[2] <- "FieldID"
+names(RVSI_130410) <- cenbuff_130410$FieldID
+RVSI_130410 <- melt(RVSI_130410, value.name = "RVSI")
+names(RVSI_130410)[2] <- "FieldID"
+##merge three together 
+df_130410 <- cbind(NDVI_130410, NDWI_130410, RVSI_130410)[,c(1,3,5,6)]
+df_130410 <- merge(df_130410, field_2013, by = "FieldID")
+##Separate Tomato and Maize
+df_130410_tomato <- subset(df_130410, df_130410$cash_crop_ == "Tomato")
+df_130410_maize <- subset(df_130410, df_130410$cash_crop_ == "Maize")
+
+#130607
+##Extract NDVI
+NDVI_130607 <- raster::extract(aviris_vi_130607$NDVI, cenbuff_130607, small = TRUE)
+NDWI_130607 <- raster::extract(aviris_vi_130607$NDWI, cenbuff_130607, small = TRUE)
+RVSI_130607 <- raster::extract(aviris_vi_130607$RVSI, cenbuff_130607, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_130607) <- cenbuff_130607$FieldID
+NDVI_130607 <- melt(NDVI_130607, value.name = "NDVI")
+names(NDVI_130607)[2] <- "FieldID"
+names(NDWI_130607) <- cenbuff_130607$FieldID
+NDWI_130607 <- melt(NDWI_130607, value.name = "NDWI")
+names(NDWI_130607)[2] <- "FieldID"
+names(RVSI_130607) <- cenbuff_130607$FieldID
+RVSI_130607 <- melt(RVSI_130607, value.name = "RVSI")
+names(RVSI_130607)[2] <- "FieldID"
+##merge three together 
+df_130607 <- cbind(NDVI_130607, NDWI_130607, RVSI_130607)[,c(1,3,5,6)]
+df_130607 <- merge(df_130607, field_2013, by = "FieldID")
+##Separate Tomato and Maize
+df_130607_tomato <- subset(df_130607, df_130607$cash_crop_ == "Tomato")
+df_130607_maize <- subset(df_130607, df_130607$cash_crop_ == "Maize")
+
+#130803
+##Extract NDVI
+NDVI_130803 <- raster::extract(aviris_vi_130803$NDVI, cenbuff_130803, small = TRUE)
+NDWI_130803 <- raster::extract(aviris_vi_130803$NDWI, cenbuff_130803, small = TRUE)
+RVSI_130803 <- raster::extract(aviris_vi_130803$RVSI, cenbuff_130803, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_130803) <- cenbuff_130803$FieldID
+NDVI_130803 <- melt(NDVI_130803, value.name = "NDVI")
+names(NDVI_130803)[2] <- "FieldID"
+names(NDWI_130803) <- cenbuff_130803$FieldID
+NDWI_130803 <- melt(NDWI_130803, value.name = "NDWI")
+names(NDWI_130803)[2] <- "FieldID"
+names(RVSI_130803) <- cenbuff_130803$FieldID
+RVSI_130803 <- melt(RVSI_130803, value.name = "RVSI")
+names(RVSI_130803)[2] <- "FieldID"
+##merge three together 
+df_130803 <- cbind(NDVI_130803, NDWI_130803, RVSI_130803)[,c(1,3,5,6)]
+df_130803 <- merge(df_130803, field_2013, by = "FieldID")
+##Separate Tomato and Maize
+df_130803_tomato <- subset(df_130803, df_130803$cash_crop_ == "Tomato")
+df_130803_maize <- subset(df_130803, df_130803$cash_crop_ == "Maize")
+
+#140418
+##Extract NDVI
+NDVI_140418 <- raster::extract(aviris_vi_140418$NDVI, cenbuff_140418, small = TRUE)
+NDWI_140418 <- raster::extract(aviris_vi_140418$NDWI, cenbuff_140418, small = TRUE)
+RVSI_140418 <- raster::extract(aviris_vi_140418$RVSI, cenbuff_140418, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_140418) <- cenbuff_140418$FieldID
+NDVI_140418 <- melt(NDVI_140418, value.name = "NDVI")
+names(NDVI_140418)[2] <- "FieldID"
+names(NDWI_140418) <- cenbuff_140418$FieldID
+NDWI_140418 <- melt(NDWI_140418, value.name = "NDWI")
+names(NDWI_140418)[2] <- "FieldID"
+names(RVSI_140418) <- cenbuff_140418$FieldID
+RVSI_140418 <- melt(RVSI_140418, value.name = "RVSI")
+names(RVSI_140418)[2] <- "FieldID"
+##merge three together 
+df_140418 <- cbind(NDVI_140418, NDWI_140418, RVSI_140418)[,c(1,3,5,6)]
+df_140418 <- merge(df_140418, field_2014, by = "FieldID")
+##Separate Tomato and Maize
+df_140418_tomato <- subset(df_140418, df_140418$cash_crop_ == "Tomato")
+df_140418_maize <- subset(df_140418, df_140418$cash_crop_ == "Maize")
+
+#140507
+##Extract NDVI
+NDVI_140507 <- raster::extract(aviris_vi_140507$NDVI, cenbuff_140507, small = TRUE)
+NDWI_140507 <- raster::extract(aviris_vi_140507$NDWI, cenbuff_140507, small = TRUE)
+RVSI_140507 <- raster::extract(aviris_vi_140507$RVSI, cenbuff_140507, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_140507) <- cenbuff_140507$FieldID
+NDVI_140507 <- melt(NDVI_140507, value.name = "NDVI")
+names(NDVI_140507)[2] <- "FieldID"
+names(NDWI_140507) <- cenbuff_140507$FieldID
+NDWI_140507 <- melt(NDWI_140507, value.name = "NDWI")
+names(NDWI_140507)[2] <- "FieldID"
+names(RVSI_140507) <- cenbuff_140507$FieldID
+RVSI_140507 <- melt(RVSI_140507, value.name = "RVSI")
+names(RVSI_140507)[2] <- "FieldID"
+##merge three together 
+df_140507 <- cbind(NDVI_140507, NDWI_140507, RVSI_140507)[,c(1,3,5,6)]
+df_140507 <- merge(df_140507, field_2014, by = "FieldID")
+##Separate Tomato and Maize
+df_140507_tomato <- subset(df_140507, df_140507$cash_crop_ == "Tomato")
+df_140507_maize <- subset(df_140507, df_140507$cash_crop_ == "Maize")
+
+#140606
+##Extract NDVI
+NDVI_140606 <- raster::extract(aviris_vi_140606$NDVI, cenbuff_140606, small = TRUE)
+NDWI_140606 <- raster::extract(aviris_vi_140606$NDWI, cenbuff_140606, small = TRUE)
+RVSI_140606 <- raster::extract(aviris_vi_140606$RVSI, cenbuff_140606, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_140606) <- cenbuff_140606$FieldID
+NDVI_140606 <- melt(NDVI_140606, value.name = "NDVI")
+names(NDVI_140606)[2] <- "FieldID"
+names(NDWI_140606) <- cenbuff_140606$FieldID
+NDWI_140606 <- melt(NDWI_140606, value.name = "NDWI")
+names(NDWI_140606)[2] <- "FieldID"
+names(RVSI_140606) <- cenbuff_140606$FieldID
+RVSI_140606 <- melt(RVSI_140606, value.name = "RVSI")
+names(RVSI_140606)[2] <- "FieldID"
+##merge three together 
+df_140606 <- cbind(NDVI_140606, NDWI_140606, RVSI_140606)[,c(1,3,5,6)]
+df_140606 <- merge(df_140606, field_2014, by = "FieldID")
+##Separate Tomato and Maize
+df_140606_tomato <- subset(df_140606, df_140606$cash_crop_ == "Tomato")
+df_140606_maize <- subset(df_140606, df_140606$cash_crop_ == "Maize")
+
+#141124
+##Extract NDVI
+NDVI_141124 <- raster::extract(aviris_vi_141124$NDVI, cenbuff_141124, small = TRUE)
+NDWI_141124 <- raster::extract(aviris_vi_141124$NDWI, cenbuff_141124, small = TRUE)
+RVSI_141124 <- raster::extract(aviris_vi_141124$RVSI, cenbuff_141124, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_141124) <- cenbuff_141124$FieldID
+NDVI_141124 <- melt(NDVI_141124, value.name = "NDVI")
+names(NDVI_141124)[2] <- "FieldID"
+names(NDWI_141124) <- cenbuff_141124$FieldID
+NDWI_141124 <- melt(NDWI_141124, value.name = "NDWI")
+names(NDWI_141124)[2] <- "FieldID"
+names(RVSI_141124) <- cenbuff_141124$FieldID
+RVSI_141124 <- melt(RVSI_141124, value.name = "RVSI")
+names(RVSI_141124)[2] <- "FieldID"
+##merge three together 
+df_141124 <- cbind(NDVI_141124, NDWI_141124, RVSI_141124)[,c(1,3,5,6)]
+df_141124 <- merge(df_141124, field_2014, by = "FieldID")
+##Separate Tomato and Maize
+df_141124_tomato <- subset(df_141124, df_141124$cash_crop_ == "Tomato")
+df_141124_maize <- subset(df_141124, df_141124$cash_crop_ == "Maize")
+
+#150430
+##Extract NDVI
+NDVI_150430 <- raster::extract(aviris_vi_150430$NDVI, cenbuff_150430, small = TRUE)
+NDWI_150430 <- raster::extract(aviris_vi_150430$NDWI, cenbuff_150430, small = TRUE)
+RVSI_150430 <- raster::extract(aviris_vi_150430$RVSI, cenbuff_150430, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_150430) <- cenbuff_150430$FieldID
+NDVI_150430 <- melt(NDVI_150430, value.name = "NDVI")
+names(NDVI_150430)[2] <- "FieldID"
+names(NDWI_150430) <- cenbuff_150430$FieldID
+NDWI_150430 <- melt(NDWI_150430, value.name = "NDWI")
+names(NDWI_150430)[2] <- "FieldID"
+names(RVSI_150430) <- cenbuff_150430$FieldID
+RVSI_150430 <- melt(RVSI_150430, value.name = "RVSI")
+names(RVSI_150430)[2] <- "FieldID"
+##merge three together 
+df_150430 <- cbind(NDVI_150430, NDWI_150430, RVSI_150430)[,c(1,3,5,6)]
+df_150430 <- merge(df_150430, field_2015, by = "FieldID")
+##Separate Tomato and Maize
+df_150430_tomato <- subset(df_150430, df_150430$cash_crop_ == "Tomato")
+df_150430_maize <- subset(df_150430, df_150430$cash_crop_ == "Maize")
+
+#150611
+##Extract NDVI
+NDVI_150611 <- raster::extract(aviris_vi_150611$NDVI, cenbuff_150611, small = TRUE)
+NDWI_150611 <- raster::extract(aviris_vi_150611$NDWI, cenbuff_150611, small = TRUE)
+RVSI_150611 <- raster::extract(aviris_vi_150611$RVSI, cenbuff_150611, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_150611) <- cenbuff_150611$FieldID
+NDVI_150611 <- melt(NDVI_150611, value.name = "NDVI")
+names(NDVI_150611)[2] <- "FieldID"
+names(NDWI_150611) <- cenbuff_150611$FieldID
+NDWI_150611 <- melt(NDWI_150611, value.name = "NDWI")
+names(NDWI_150611)[2] <- "FieldID"
+names(RVSI_150611) <- cenbuff_150611$FieldID
+RVSI_150611 <- melt(RVSI_150611, value.name = "RVSI")
+names(RVSI_150611)[2] <- "FieldID"
+##merge three together 
+df_150611 <- cbind(NDVI_150611, NDWI_150611, RVSI_150611)[,c(1,3,5,6)]
+df_150611 <- merge(df_150611, field_2015, by = "FieldID")
+##Separate Tomato and Maize
+df_150611_tomato <- subset(df_150611, df_150611$cash_crop_ == "Tomato")
+df_150611_maize <- subset(df_150611, df_150611$cash_crop_ == "Maize")
+
+#160620
+##Extract NDVI
+NDVI_160620 <- raster::extract(aviris_vi_160620$NDVI, cenbuff_160620, small = TRUE)
+NDWI_160620 <- raster::extract(aviris_vi_160620$NDWI, cenbuff_160620, small = TRUE)
+RVSI_160620 <- raster::extract(aviris_vi_160620$RVSI, cenbuff_160620, small = TRUE)
+##convert the list to a dataframe
+names(NDVI_160620) <- cenbuff_160620$FieldID
+NDVI_160620 <- melt(NDVI_160620, value.name = "NDVI")
+names(NDVI_160620)[2] <- "FieldID"
+names(NDWI_160620) <- cenbuff_160620$FieldID
+NDWI_160620 <- melt(NDWI_160620, value.name = "NDWI")
+names(NDWI_160620)[2] <- "FieldID"
+names(RVSI_160620) <- cenbuff_160620$FieldID
+RVSI_160620 <- melt(RVSI_160620, value.name = "RVSI")
+names(RVSI_160620)[2] <- "FieldID"
+##merge three together 
+df_160620 <- cbind(NDVI_160620, NDWI_160620, RVSI_160620)[,c(1,3,5,6)]
+df_160620 <- merge(df_160620, field_2016, by = "FieldID")
+##Separate Tomato and Maize
+df_160620_tomato <- subset(df_160620, df_160620$cash_crop_ == "Tomato")
+df_160620_maize <- subset(df_160620, df_160620$cash_crop_ == "Maize")
+
+```
+
+#Dotplot
+```{r}
+pdf("RR AVIRIS Dotplots.pdf")
+#130410
+##Tomato
+###NDVI
+ggplot(df_130410_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.04.10 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_130410_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.04.10 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_130410_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.04.10 Tomato RVSI")  + xlab("System Code") + ylim(-0.10,0)
+##maize 
+###NDVI
+ggplot(df_130410_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.04.10 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_130410_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.04.10 maize NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_130410_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.04.10 maize RVSI")  + xlab("System Code") + ylim(-0.10,0)
+
+#130607
+##Tomato
+###NDVI
+ggplot(df_130607_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.06.07 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_130607_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.06.07 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_130607_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.06.07 Tomato RVSI")  + xlab("System Code") + ylim(-0.10,0)
+##maize 
+###NDVI
+ggplot(df_130607_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.06.07 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_130607_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.06.07 maize NDWI")  + xlab("System Code") + ylim(-0.2, 0.3)
+###RVSI
+ggplot(df_130607_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.06.07 maize RVSI")  + xlab("System Code") + ylim(-0.07, 0)
+
+#130803
+##Tomato
+###NDVI
+ggplot(df_130803_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.08.03 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_130803_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.08.03 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_130803_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.08.03 Tomato RVSI")  + xlab("System Code") + ylim(-0.10,0)
+##maize 
+###NDVI
+ggplot(df_130803_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.08.03 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_130803_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.08.03 maize NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_130803_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2013.08.03 maize RVSI")  + xlab("System Code") + ylim(-0.10,0)
+
+#140418
+##Tomato
+###NDVI
+ggplot(df_140418_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.04.18 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_140418_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.04.18 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_140418_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.04.18 Tomato RVSI")  + xlab("System Code") + ylim(-0.10,0)
+##maize 
+###NDVI
+ggplot(df_140418_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.04.18 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_140418_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.04.18 maize NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_140418_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.04.18 maize RVSI")  + xlab("System Code") + ylim(-0.10,0)
+
+#140507
+##Tomato
+###NDVI
+ggplot(df_140507_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.05.07 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_140507_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.05.07 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_140507_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.05.07 Tomato RVSI")  + xlab("System Code") + ylim(-0.10,0)
+##maize 
+###NDVI
+ggplot(df_140507_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.05.07 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_140507_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.05.07 maize NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_140507_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.05.07 maize RVSI")  + xlab("System Code") + ylim(-0.10,0)
+
+#140606
+##Tomato
+###NDVI
+ggplot(df_140606_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.06.06 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_140606_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.06.06 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_140606_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.06.06 Tomato RVSI")  + xlab("System Code") + ylim(-0.10,0)
+##maize 
+###NDVI
+ggplot(df_140606_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.06.06 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_140606_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.06.06 maize NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_140606_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.06.06 maize RVSI")  + xlab("System Code") + ylim(-0.10,0)
+
+#141124
+##Tomato
+###NDVI
+ggplot(df_141124_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.11.24 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_141124_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.11.24 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_141124_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.11.24 Tomato RVSI")  + xlab("System Code") + ylim(-0.10,0)
+##maize 
+###NDVI
+ggplot(df_141124_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.11.24 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_141124_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.11.24 maize NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_141124_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2014.11.24 maize RVSI")  + xlab("System Code") + ylim(-0.10,0)
+
+#150430
+##Tomato
+###NDVI
+ggplot(df_150430_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.04.30 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_150430_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.04.30 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_150430_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.04.30 Tomato RVSI")  + xlab("System Code") + ylim(-0.10,0)
+##maize 
+###NDVI
+ggplot(df_150430_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.04.30 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_150430_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.04.30 maize NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_150430_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.04.30 maize RVSI")  + xlab("System Code") + ylim(-0.10,0)
+
+#150611
+##Tomato
+###NDVI
+ggplot(df_150611_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.06.11 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_150611_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.06.11 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_150611_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.06.11 Tomato RVSI")  + xlab("System Code") + ylim(-0.10,0)
+##maize 
+###NDVI
+ggplot(df_150611_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.06.11 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_150611_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.06.11 maize NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_150611_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2015.06.11 maize RVSI")  + xlab("System Code") + ylim(-0.10,0)
+
+#160620
+##Tomato
+###NDVI
+ggplot(df_160620_tomato, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2016.06.20 Tomato NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_160620_tomato, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2016.06.20 Tomato NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_160620_tomato, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2016.06.20 Tomato RVSI")  + xlab("System Code") + ylim(-0.1,0)
+##maize 
+###NDVI
+ggplot(df_160620_maize, aes(y = NDVI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2016.06.20 maize NDVI")  + xlab("System Code") + ylim(0,1)
+###NDWI
+ggplot(df_160620_maize, aes(y = NDWI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2016.06.20 maize NDWI")  + xlab("System Code") + ylim(-0.21,0.35)
+###RVSI
+ggplot(df_160620_maize, aes(y = RVSI, x = system_cod, color = system_cod))  + geom_point() + ggtitle("2016.06.20 maize RVSI")  + xlab("System Code") + ylim(-0.1,0)
+
+dev.off()
+```
+
+#aggregate by the mean of FieldID
+##2013
+```{r}
+df_130410_mean <- aggregate(df_130410[,c(2:4)], by = list(FieldID = df_130410$FieldID), FUN = mean)
+df_130410_mean <- merge(df_130410_mean, field_2013)
+df_130410_mean$Date <- as.Date("2013-04-10")
+
+df_130607_mean <- aggregate(df_130607[,c(2:4)], by = list(FieldID = df_130607$FieldID), FUN = mean)
+df_130607_mean <- merge(df_130607_mean, field_2013)
+df_130607_mean$Date <- as.Date("2013-06-07")
+
+df_130803_mean <- aggregate(df_130803[,c(2:4)], by = list(FieldID = df_130803$FieldID), FUN = mean)
+df_130803_mean <- merge(df_130803_mean, field_2013)
+df_130803_mean$Date <- as.Date("2013-08-03")
+
+```
+##2014
+```{r}
+df_140418_mean <- aggregate(df_140418[,c(2:4)], by = list(FieldID = df_140418$FieldID), FUN = mean)
+df_140418_mean <- merge(df_140418_mean, field_2014)
+df_140418_mean$Date <- as.Date("2014-04-18")
+
+df_140507_mean <- aggregate(df_140507[,c(2:4)], by = list(FieldID = df_140507$FieldID), FUN = mean)
+df_140507_mean <- merge(df_140507_mean, field_2014)
+df_140507_mean$Date <- as.Date("2014-05-07")
+
+df_140606_mean <- aggregate(df_140606[,c(2:4)], by = list(FieldID = df_140606$FieldID), FUN = mean)
+df_140606_mean <- merge(df_140606_mean, field_2014)
+df_140606_mean$Date <- as.Date("2014-06-06")
+```
+##2015
+```{r}
+df_150430_mean <- aggregate(df_150430[,c(2:4)], by = list(FieldID = df_150430$FieldID), FUN = mean)
+df_150430_mean <- merge(df_150430_mean, field_2015)
+df_150430_mean$Date <- as.Date("2015-04-30")
+
+df_150611_mean <- aggregate(df_150611[,c(2:4)], by = list(FieldID = df_150611$FieldID), FUN = mean)
+df_150611_mean <- merge(df_150611_mean, field_2015)
+df_150611_mean$Date <- as.Date("2015-06-11")
+
+```
+##2016
+```{r}
+df_160620_mean <- aggregate(df_160620[,c(2:4)], by = list(FieldID = df_160620$FieldID), FUN = mean)
+df_160620_mean <- merge(df_160620_mean, field_2016)
+df_160620_mean$Date <- as.Date("2016-06-20")
+
+
+```
+
+#compare with historical yield data
+##2013
+```{r}
+#tomato 
+##130607
+cor_130607_tomato <- cor(subset(df_130607_mean, cash_crop_=="Tomato")[,c(2:4,14:16)])
+corrplot.mixed(cor_130607_tomato)
+##130803
+cor_130803_tomato <- cor(subset(df_130803_mean, cash_crop_=="Tomato")[,c(2:4,14:16)])
+corrplot.mixed(cor_130803_tomato)
+
+#maize 
+##130410
+cor_130410_maize <- cor(subset(df_130410_mean, cash_crop_=="Maize")[,c(2:4,12:13)])
+corrplot.mixed(cor_130410_maize)
+#130610
+cor_130607_maize <- cor(subset(df_130607_mean, cash_crop_=="Maize")[,c(2:4,12:13)])
+corrplot.mixed(cor_130607_maize)
+#130803
+cor_130803_maize <- cor(subset(df_130803_mean, cash_crop_=="Maize")[,c(2:4,12:13)])
+corrplot.mixed(cor_130803_maize)
+```
+
+##2014
+```{r}
+#tomato 
+##140507
+cor_140507_tomato <- cor(subset(df_140507_mean, cash_crop_=="Tomato")[,c(2:4,14:16)])
+corrplot.mixed(cor_140507_tomato)
+##140606
+cor_140606_tomato <- cor(subset(df_140606_mean, cash_crop_=="Tomato")[,c(2:4,14:16)])
+corrplot.mixed(cor_140606_tomato)
+
+#maize 
+##140507
+cor_140507_maize <- cor(subset(df_140507_mean, cash_crop_=="Maize")[,c(2:4,12:13)])
+corrplot.mixed(cor_140507_maize)
+#140606
+cor_140606_maize <- cor(subset(df_140606_mean, cash_crop_=="Maize")[,c(2:4,12:13)])
+corrplot.mixed(cor_140606_maize)
+
+```
+##2015
+```{r}
+#tomato 
+##150430
+cor_150430_tomato <- cor(subset(df_150430_mean, cash_crop_=="Tomato")[,c(2:4,14:16)])
+corrplot.mixed(cor_150430_tomato)
+##150611
+cor_150611_tomato <- cor(subset(df_150611_mean, cash_crop_=="Tomato")[,c(2:4,14:16)])
+corrplot.mixed(cor_150611_tomato)
+
+#maize 
+##150430
+cor_150430_maize <- cor(subset(df_150430_mean, cash_crop_=="Maize")[,c(2:4,12:13)])
+corrplot.mixed(cor_150430_maize)
+#150611
+cor_150611_maize <- cor(subset(df_150611_mean, cash_crop_=="Maize")[,c(2:4,12:13)])
+corrplot.mixed(cor_150611_maize)
+
+```
+##2016
+```{r}
+#tomato 
+##160620
+cor_160620_tomato <- cor(subset(df_160620_mean, cash_crop_=="Tomato")[,c(2:4,14:16)])
+corrplot.mixed(cor_160620_tomato)
+
+#maize 
+#160620
+cor_160620_maize <- cor(subset(df_160620_mean, cash_crop_=="Maize")[,c(2:4,12:13)])
+corrplot.mixed(cor_160620_maize)
+
+
+```
+
+
+#output the current environment 
+```{r}
+save.image("C:/Users/zt92/Box Sync/CC_UCD_RR/Code/Environment_20190207 (Extract VIs from AVIRIS).RData")
+```
+
