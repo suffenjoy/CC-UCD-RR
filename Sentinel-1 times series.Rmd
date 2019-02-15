@@ -1,0 +1,225 @@
+---
+title: "Sentinel-1 time series"
+author: "Zhehan"
+date: "February 13, 2019"
+output: html_document
+---
+
+#pacakge
+```{r}
+library(ggplot2)
+library(tidyr)
+```
+
+#read csv file
+```{r}
+path_sen1 <- "Z:/CC_UCD_atRR/data2/Sentinel-1"
+
+##field ID 
+GGE_FieldID <- read.csv(file.path(path_sen1, "GGE_FieldID.csv"))
+
+#entire Russell Ranch
+##2017 
+df_sen1_RR_2017 <- read.csv(file.path(path_sen1, "S1_BND_2017.csv"))
+names(df_sen1_RR_2017)[1] <- "Date"
+df_sen1_RR_2017$Date <- as.Date(df_sen1_RR_2017$Date, format = "%b %d, %Y")
+df_sen1_RR_2017$Product = "Sen1"
+##2018
+df_sen1_RR_2018 <- read.csv(file.path(path_sen1, "S1_BND_2018.csv"))
+names(df_sen1_RR_2018)[1] <- "Date"
+df_sen1_RR_2018$Date <- as.Date(df_sen1_RR_2018$Date, format = "%b %d, %Y")
+df_sen1_RR_2018$Product = "Sen1"
+
+#individual field
+##2017
+###VV
+df_VV_CE_2017 <- read.csv(file.path(path_sen1, "S1_CEN_VV_2017.csv"))
+names(df_VV_CE_2017)[1] <- "Date"
+df_VV_CE_2017$Date <- as.Date(df_VV_CE_2017$Date, format = "%b %d, %Y")
+names(df_VV_CE_2017)[2:73] <- as.character(GGE_FieldID$FieldID)
+df_VV_CE_2017 <- tidyr::gather(df_VV_CE_2017, FieldID, VV, "1-1":"8-2")
+###VH
+df_VH_CE_2017 <- read.csv(file.path(path_sen1, "S1_CEN_VH_2017.csv"))
+names(df_VH_CE_2017)[1] <- "Date"
+df_VH_CE_2017$Date <- as.Date(df_VH_CE_2017$Date, format = "%b %d, %Y")
+names(df_VH_CE_2017)[2:73] <- as.character(GGE_FieldID$FieldID)
+df_VH_CE_2017 <- tidyr::gather(df_VH_CE_2017, FieldID, VH, "1-1":"8-2")
+###angle
+df_angle_CE_2017 <- read.csv(file.path(path_sen1, "S1_CEN_angle_2017.csv"))
+names(df_angle_CE_2017)[1] <- "Date"
+df_angle_CE_2017$Date <- as.Date(df_angle_CE_2017$Date, format = "%b %d, %Y")
+names(df_angle_CE_2017)[2:73] <- as.character(GGE_FieldID$FieldID)
+df_angle_CE_2017 <- tidyr::gather(df_angle_CE_2017, FieldID, angle, "1-1":"8-2")
+
+
+##2018
+###VV
+df_VV_CE_2018 <- read.csv(file.path(path_sen1, "S1_CEN_VV_2018.csv"))
+names(df_VV_CE_2018)[1] <- "Date"
+df_VV_CE_2018$Date <- as.Date(df_VV_CE_2018$Date, format = "%b %d, %Y")
+names(df_VV_CE_2018)[2:73] <- as.character(GGE_FieldID$FieldID)
+df_VV_CE_2018 <- tidyr::gather(df_VV_CE_2018, FieldID, VV, "1-1":"8-2")
+###VH
+df_VH_CE_2018 <- read.csv(file.path(path_sen1, "S1_CEN_VH_2018.csv"))
+names(df_VH_CE_2018)[1] <- "Date"
+df_VH_CE_2018$Date <- as.Date(df_VH_CE_2018$Date, format = "%b %d, %Y")
+names(df_VH_CE_2018)[2:73] <- as.character(GGE_FieldID$FieldID)
+df_VH_CE_2018 <- tidyr::gather(df_VH_CE_2018, FieldID, VH, "1-1":"8-2")
+###angle
+df_angle_CE_2018 <- read.csv(file.path(path_sen1, "S1_CEN_angle_2018.csv"))
+names(df_angle_CE_2018)[1] <- "Date"
+df_angle_CE_2018$Date <- as.Date(df_angle_CE_2018$Date, format = "%b %d, %Y")
+names(df_angle_CE_2018)[2:73] <- as.character(GGE_FieldID$FieldID)
+df_angle_CE_2018 <- tidyr::gather(df_angle_CE_2018, FieldID, angle, "1-1":"8-2")
+
+
+```
+
+#merge 
+```{r}
+#calculate IW
+##2017
+df_sen1_RR_2017$IW <- "0"
+for(i in 1:nrow(df_sen1_RR_2017)){
+  if(df_sen1_RR_2017$angle[i]>40){
+    df_sen1_RR_2017$IW[i] <- "IW2"
+  }
+  if(df_sen1_RR_2017$angle[i]<40){
+    df_sen1_RR_2017$IW[i] <- "IW1"
+  }
+}
+##2018
+df_sen1_RR_2018$IW <- "0"
+for(i in 1:nrow(df_sen1_RR_2018)){
+  if(df_sen1_RR_2018$angle[i]>40){
+    df_sen1_RR_2018$IW[i] <- "IW2"
+  }
+  if(df_sen1_RR_2018$angle[i]<40){
+    df_sen1_RR_2018$IW[i] <- "IW1"
+  }
+}
+
+
+#merge VV, VH, angle
+df_sen1_CE_2017 <- cbind(df_VV_CE_2017, df_VH_CE_2017$VH, df_angle_CE_2017$angle)
+names(df_sen1_CE_2017)[4:5] <- c("VH","angle")
+#add another column IW
+df_sen1_CE_2017$IW <- "0"
+for(i in 1:nrow(df_sen1_CE_2017)){
+  if(df_sen1_CE_2017$angle[i]>40){
+    df_sen1_CE_2017$IW[i] <- "IW2"
+  }
+  if(df_sen1_CE_2017$angle[i]<40){
+    df_sen1_CE_2017$IW[i] <- "IW1"
+  }
+}
+df_sen1_CE_2018 <- cbind(df_VV_CE_2018, df_VH_CE_2018$VH, df_angle_CE_2018$angle)
+names(df_sen1_CE_2018)[4:5] <- c("VH","angle")
+#add another column IW
+df_sen1_CE_2018$IW <- "0"
+for(i in 1:nrow(df_sen1_CE_2018)){
+  if(df_sen1_CE_2018$angle[i]>40){
+    df_sen1_CE_2018$IW[i] <- "IW2"
+  }
+  if(df_sen1_CE_2018$angle[i]<40){
+    df_sen1_CE_2018$IW[i] <- "IW1"
+  }
+}
+#merge with field data
+##2017, further analysis focuses on 2017 only. 
+df_sen1_CE_2017 <- merge(df_sen1_CE_2017, field_2017, by = 'FieldID')
+##2018 
+df_sen1_CE_2018 <- merge(df_sen1_CE_2018, field_2018, by = 'FieldID')
+
+#add more columns 
+##VV+VH
+##VV-VH
+##VH/VV
+```
+
+#compare with Sentinel-2 NDVI time series
+```{r}
+#2017
+#2017 NDVI
+ggplot(df_NDVI_RR_mean_2017_sen2_l2a, aes(x = Date, y= NDVI)) + geom_point(color = 'darkgreen') + geom_line(color = 'darkgreen') + scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months") + ylim(0,1) + ggtitle("Russell Ranch Average NDVI from Sentinel-2 L2A in 2017")
+#2017 VH
+ggplot(df_sen1_RR_2017, aes(x = Date, y = VH, color = IW)) + geom_point() + geom_line()+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")  + ggtitle("Russell Ranch Average VH from Sentinel-1 in 2017")# + ylim(-25,-15)
+#2017 VV
+ggplot(df_sen1_RR_2017, aes(x = Date, y = VV, color = IW)) + geom_point() + geom_line()+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")  + ggtitle("Russell Ranch Average VV from Sentinel-1 in 2017") 
+#2017 VV-VH
+ggplot(df_sen1_RR_2017, aes(x = Date, y = VV-VH, color = IW)) + geom_point() + geom_line()+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")  + ggtitle("Russell Ranch Average VV-VH from Sentinel-1 in 2017") 
+
+
+#2018 NDVI
+ggplot(df_NDVI_RR_mean_2018_sen2_l2a, aes(x = Date, y= NDVI)) + geom_point(color = 'darkgreen') + geom_line(color = 'darkgreen') + scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months") + ylim(0,1) + ggtitle("Russell Ranch Average NDVI from Sentinel-2 L2A in 2018")
+#2018 VH
+ggplot(df_sen1_RR_2018, aes(x = Date, y = VH, color = IW)) + geom_point() + geom_line()+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")  + ggtitle("Russell Ranch Average VH from Sentinel-1 in 2018")# + ylim(-25,-15)
+#2018 VV
+ggplot(df_sen1_RR_2018, aes(x = Date, y = VV, color = IW)) + geom_point() + geom_line()+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")  + ggtitle("Russell Ranch Average VV from Sentinel-1 in 2018") 
+#2018 VV-VH
+ggplot(df_sen1_RR_2018, aes(x = Date, y = VV-VH, color = IW)) + geom_point() + geom_line()+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")  + ggtitle("Russell Ranch Average VV-VH from Sentinel-1 in 2018") 
+
+```
+
+
+#compare with Sentinel-2 NDVI time series
+##entire russell ranch 
+```{r}
+ggplot(df_)
+##2017
+par(mfrow  = c(2,2))
+ggplot(df_sen1_RR_2017, aes(x = Date, y = VV))
+plot(df_NDVI_RR_mean_2017_sen2_l2a$Date, df_NDVI_RR_mean_2017_sen2_l2a$NDVI, ylim = c(0,0.5))
+plot(df_sen1_RR_2017$Date, df_sen1_RR_2017$VH)
+plot(df_sen1_RR_2017$Date, df_sen1_RR_2017$VV)
+plot(df_sen1_RR_2017$Date, df_sen1_RR_2017$VH/df_sen1_RR_2017$VV)
+
+plot(df_sen1_RR_2017$Date, df_sen1_RR_2017$VV+df_sen1_RR_2017$VH)
+
+
+a <- merge(df_NDVI_RR_mean_2017_sen2_l2a, df_sen1_RR_2017, by = "Date")
+ggplot(df_NDVI_RR_mean_2017_sen2_l2a, aes( x= Date, y = NDVI)) + geom_point() + geom_line() + 
+##2017 
+ggplot(rbind(df_NDVI_RR_mean_2017_sen2_l1c, df_NDVI_RR_mean_2017_sen2_l2a), aes(x  = Date, y = NDVI, color = Product)) + geom_point() + geom_line() +ggtitle("Russell Ranch Average NDVI from Sentinel-2 Product in 2017") + scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months") + ylim(0,1)
+##2018 
+ggplot(rbind(df_NDVI_RR_mean_2018_sen2_l1c, df_NDVI_RR_mean_2018_sen2_l2a), aes(x  = Date, y = NDVI, color = Product)) + geom_point() + geom_line() +ggtitle("Russell Ranch Average NDVI from Sentinel-2 Product in 2018") + scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months") + ylim(0,1)
+
+```
+
+#indiviudal blocks
+```{r}
+#2017 
+##tomato VV IW1
+ggplot(subset(df_sen1_CE_2017,cash_crop_=="Tomato" & IW=="IW1"),aes(x = Date, y = VV, group = FieldID)) + geom_line(aes(color = system_cod)) + geom_point(aes(color = system_cod)) + geom_vline(xintercept = c(as.Date("2017-05-01"),as.Date("2017-08-24"))) + ggtitle("Tomato Field VV from Sentinel-1 in 2017")+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")
+##tomato VH IW1
+ggplot(subset(df_sen1_CE_2017,cash_crop_=="Tomato" & IW=="IW1"),aes(x = Date, y = VH, group = FieldID)) + geom_line(aes(color = system_cod)) + geom_point(aes(color = system_cod)) + geom_vline(xintercept = c(as.Date("2017-05-01"),as.Date("2017-08-24"))) + ggtitle("Tomato Field VH from Sentinel-1 in 2017")+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")
+##maize VV IW1
+ggplot(subset(df_sen1_CE_2017,cash_crop_=="Maize" & IW=="IW1"),aes(x = Date, y = VV, group = FieldID)) + geom_line(aes(color = system_cod)) + geom_point(aes(color = system_cod)) + geom_vline(xintercept = c(as.Date("2017-04-24"),as.Date("2017-09-19"))) + ggtitle("Maize Field VV from Sentinel-1 in 2017")+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")
+##maize VH IW1
+ggplot(subset(df_sen1_CE_2017,cash_crop_=="Maize" & IW=="IW1"),aes(x = Date, y = VH, group = FieldID)) + geom_line(aes(color = system_cod)) + geom_point(aes(color = system_cod)) + geom_vline(xintercept = c(as.Date("2017-04-24"),as.Date("2017-09-19"))) + ggtitle("Maize Field VH from Sentinel-1 in 2017")+ scale_x_date(date_labels = "%Y-%m", date_breaks = "1 months")
+
+#2018 
+
+```
+
+#aggregate by system code 
+```{r}
+
+```
+
+#irrigation treatment
+```{r}
+unique(subset(df_sen1_CE_2017, cash_crop_=="Maize")$irrigation)
+unique(subset(df_sen1_CE_2017, cash_crop_=="Tomato")$irrigation)
+
+#drip maize 
+ggplot(subset(df_sen1_CE_2017, cash_crop_=="Maize" & IW == "IW1"),aes(x = Date, y = VV, group = FieldID)) + geom_point(aes(color = irrigation)) + geom_line(aes(color = irrigation))
+ggplot(subset(df_sen1_CE_2017, cash_crop_=="Maize" & IW == "IW1"),aes(x = Date, y = VV-VH, group = FieldID)) + geom_point(aes(color = irrigation)) + geom_line(aes(color = irrigation))
+ggplot(subset(df_sen1_CE_2017, cash_crop_=="Maize" & IW == "IW1"),aes(x = Date, y = VV/VH, group = FieldID)) + geom_point(aes(color = irrigation)) + geom_line(aes(color = irrigation))
+
+ggplot(subset(df_sen1_CE_2017, cash_crop_=="Maize" & irrigation == "drip" & IW == "IW1"),aes(x = Date, y = VV, group = FieldID)) + geom_point(aes(color = system_cod)) + geom_line(aes(color = system_cod))
+ggplot(subset(df_sen1_CE_2017, cash_crop_=="Maize" & irrigation == "flood" & IW == "IW1"),aes(x = Date, y = VV, group = FieldID)) + geom_point() + geom_line()
+
+
+```
+
