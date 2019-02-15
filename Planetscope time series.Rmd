@@ -1,0 +1,90 @@
+---
+title: "Planetscope time series"
+author: "Zhehan"
+date: "January 30, 2019"
+output: html_document
+---
+#package 
+```{r}
+library(XML)
+library(plyr)
+library(qdapRegex)
+library(raster)
+```
+
+#read shapefiles 
+```{r}
+path_shp <- "Z:/CC_UCD_atRR/data2/BNDs"
+
+#a small area that just covers RR
+RR_BND_sen2 <- shapefile(file.path(path_shp, "RR_BND_sen2.shp"))
+plot(RR_BND_sen2, add= TRUE)
+
+#The shapefile of the center of each field with a 15m buffer 
+RR_center <- shapefile(file.path(path_shp, "RR_center_15mbuffer.shp"))
+plot(RR_center, add = TRUE)
+```
+
+#read metadata 
+```{r}
+path_pl <- "Z:/CC_UCD_atRR/data1/Planetscope"
+
+#list of all metadata files 
+plmeta_ls <- as.list(list.files(path_pl, pattern = "metadata"))
+
+plmeta_dates <- sapply(plmeta_ls, function(x){qdapRegex::rm_between(x, "_", "_", extract = TRUE)[[1]][2]})
+
+#empty list to store all metadata
+pl_meta <- list()
+for(i in 1:length(plmeta_ls)){
+  #metadata 
+  meta <- XML::xmlParse(file.path(path_pl, plmeta_ls[[i]]))
+  metatop <- XML::xmlRoot(meta)
+  #read the conversion coefficient from metadata
+  pl_meta[[i]] <- c(as.numeric(xmlValue(metatop[[5]][[1]][[6]][[5]][[1]])),  as.numeric(xmlValue(metatop[[5]][[1]][[7]][[5]][[1]])),  as.numeric(xmlValue(metatop[[5]][[1]][[8]][[5]][[1]])),  as.numeric(xmlValue(metatop[[5]][[1]][[9]][[5]][[1]])))
+  #give it a name 
+  names(pl_meta)[i] <- qdapRegex::rm_between(plmeta_ls[[i]], "_", "_", extract = TRUE)[[1]][2]
+  #print the date for checking purpose 
+  print(names(pl_meta)[i])
+}
+
+
+```
+
+#read image file 
+```{r}
+#list of all image files 
+pl_ls <- as.list(list.files(path_pl, pattern = ".tif"))
+#get dates 
+pl_dates <- sapply(pl_ls, function(x){qdapRegex::rm_between(x, "_", "_", extract = TRUE)[[1]][2]})
+
+#empty list to store all image data
+pl_img <- list()
+start_time <- Sys.time()
+for(i in 1:length(pl_ls)){
+  #read the image 
+  img <- raster::brick(file.path(path_pl, pl_ls[[i]]))
+  
+  #crop with the boundary shapefile 
+  pl_img[[i]] <- raster::crop(img, RR_BND_sen2)
+  
+  #calculate with the conversion coefficient 
+  ##Blue
+  pl_img[[i]][[1]] = pl_img[[i]][[1]]*pl_meta[[i]][1]
+  ##green
+  pl_img[[i]][[2]] = pl_img[[i]][[2]]*pl_meta[[i]][2]
+  ##red 
+  pl_img[[i]][[3]] = pl_img[[i]][[3]]*pl_meta[[i]][3]
+  ##nir
+  pl_img[[i]][[4]] = pl_img[[i]][[4]]*pl_meta[[i]][4]
+  
+  #give each a name 
+  names(pl_img)[i] <- qdapRegex::rm_between(pl_ls[[i]], "_", "_", extract = TRUE)[[1]][2]
+  #print the date for checking purpose 
+  print(names(pl_img)[i])
+}
+end_time <- Sys.time()
+end_time - start_time
+
+```
+
