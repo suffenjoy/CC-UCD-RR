@@ -26,6 +26,44 @@ plot(uav_rr_090718)
 path_shp <- "C:/Users/zt92/Box Sync/CC_UCD_RR/Shapefiles"
 pixeltargets <- shapefile(file.path(path_shp, "PixelTargetst.shp"))
 fieldbound <- shapefile(file.path(path_shp, "CenturyExp_Fields_WGS84.shp"))
+
+
+path_shp_2 <- "Z:/CC_UCD_atRR/data2/BNDs"
+#The shapefile of the center of each field with a 15m buffer 
+RR_center <- shapefile(file.path(path_shp_2, "RR_center_15mbuffer.shp"))
+
+path_his <- "Z:/CC_UCD_atRR/data2/BNDs/RR_CE_Shps_2013toPresent"
+#path_his <- "/z0/zt92/CC_UCD_RR/data2/BNDs/RR_CE_Shps_2013toPresent"
+##2015
+field_2015 <- as.data.frame(shapefile(file.path(path_his, "CE_TMW_2015.shp")))
+field_2015 <- field_2015[,c("FieldID","year","block","system_cod","irrigation","cash_crop_","cash_cro_1", "cash_cro_2", "maize_mach", "maize_stov", "tomato_mac", "tomato_gre", "tomato_vin")]
+##2016
+field_2016 <- as.data.frame(shapefile(file.path(path_his, "CE_TMW_2016.shp")))
+field_2016 <- field_2016[,c("FieldID","year","block","system_cod","irrigation","cash_crop_","cash_cro_1", "cash_cro_2", "maize_mach", "maize_stov", "tomato_mac", "tomato_gre", "tomato_vin")]
+##2017
+field_2017 <- as.data.frame(shapefile(file.path(path_his, "CE_TMW_2017.shp")))
+field_2017 <- field_2017[,c("FieldID","year","block","system_cod","irrigation","cash_crop_","cash_cro_1", "cash_cro_2", "maize_mach", "maize_stov", "tomato_mac", "tomato_gre", "tomato_vin")]
+##2018
+field_2018 <- as.data.frame(shapefile(file.path(path_his, "CE_TMW_2018.shp")))
+field_2018 <- field_2018[,c("FieldID","year","block","system_cod","irrigation","cash_crop_","cash_cro_1", "cash_cro_2", "maize_mach", "maize_stov", "tomato_mac", "tomato_gre", "tomato_vin")]
+#add cash_crop_ content
+##tomato 
+field_2018$cash_crop_[field_2018$FieldID %in% c("1-1","1-3","2-3","2-5","4-5","4-8","5-2","5-3","6-3","6-4","6-6","6-7","6-8","7-5","8-9")] <- "Tomato"
+##maize
+field_2018$cash_crop_[field_2018$FieldID %in% c("1-2","1-4","2-4","4-4","5-5","6-5","6-9","7-8","8-8")] <- "Maize"
+#add system_cod content
+field_2018$system_cod 
+
+system_cod <- cbind(field_2015[order(field_2015$FieldID),]$system_cod, field_2016[order(field_2016$FieldID),]$system_cod, field_2017[order(field_2017$FieldID),]$system_cod)
+for(i in 1:72){
+  if(sum(is.na(system_cod[i,]))==3){
+    field_2018[order(field_2018$FieldID),]$system_cod[i] = NA
+  }
+  else {
+    field_2018[order(field_2018$FieldID),]$system_cod[i] = unique(na.omit((system_cod[i,])))
+  }
+}
+
 ```
 
 #extract data from UAV 
@@ -37,6 +75,13 @@ pixel_uav$plot <- pixeltargets$Plot
 pixel_uav$plotid <- pixeltargets$PlotID
 
 plot_uav <- aggregate(pixel_uav[2:7], list("plot"=pixel_uav$plot), mean)
+
+#-----------------------------------#
+#by each block 
+block_uav <- raster::extract(uav_rr_090718, RR_center, method = 'simple', na.rm = TRUE, fun = mean, df = TRUE)
+block_uav$FieldID <- RR_center$FieldID
+#merge with crop information 
+df_block_uav <- merge(block_uav, field_2018, by = "FieldID")
 ```
 
 
@@ -105,6 +150,13 @@ pixel_sen$plotid <- pixeltargets$PlotID
 plot_sen <- aggregate(pixel_sen[2:11], list("plot"=pixel_sen$plot), mean)
 
 
+
+#-------------extract for individual plots
+block_sen2 <- raster::extract(sen_rr_090718, RR_center, method = "simple", na.rm = TRUE, df = TRUE, fun = mean)
+block_sen2[,-1] <- block_sen2[,-1]/10000
+block_sen2$FieldID <- RR_center$FieldID
+df_block_sen2 <- merge(block_sen2, field_2018, by = "FieldID")
+
 ```
 
 #output the dfs
@@ -153,6 +205,29 @@ lines(x = wavelen_uav, y = plot_uav[4, 2:6], type = "o", col = "red", pch = 20)
 lines(x = wavelen_uav, y = plot_uav[5, 2:6], type = "o", col = "orange", pch = 20)
 legend("bottomright", legend = c("1-4","5-5","7-8"), col = c("blue","red","orange"), pch = 20)
 
+
+#for 2-2
+par(mfrow = c(2,3))
+#1-2
+plot(x = wavelen_sen, y = subset(df_block_sen2,FieldID == "1-2")[,3:12],  type = 'o', xlab = "wavelenth", ylab = "reflectance", ylim = c(0,0.5), col = 'blue', main = "Plot 1-2", pch = 20)
+lines(x = wavelen_uav, y = subset(df_block_uav, FieldID == "1-2")[,3:7],  type = 'o', col = 'red', pch = 20)
+#3-3
+plot(x = wavelen_sen, y = subset(df_block_sen2,FieldID == "3-3")[,3:12],  type = 'o', xlab = "wavelenth", ylab = "reflectance", ylim = c(0,0.5), col = 'blue', main = "Plot 3-3", pch = 20)
+lines(x = wavelen_uav, y = subset(df_block_uav, FieldID == "3-3")[,3:7],  type = 'o', col = 'red', pch = 20)
+#4-7
+plot(x = wavelen_sen, y = subset(df_block_sen2,FieldID == "4-7")[,3:12],  type = 'o', xlab = "wavelenth", ylab = "reflectance", ylim = c(0,0.5), col = 'blue', main = "Plot 4-7", pch = 20)
+lines(x = wavelen_uav, y = subset(df_block_uav, FieldID == "4-7")[,3:7],  type = 'o', col = 'red', pch = 20)
+#6-5
+plot(x = wavelen_sen, y = subset(df_block_sen2,FieldID == "6-5")[,3:12],  type = 'o', xlab = "wavelenth", ylab = "reflectance", ylim = c(0,0.5), col = 'blue', main = "Plot 6-5", pch = 20)
+lines(x = wavelen_uav, y = subset(df_block_uav, FieldID == "6-5")[,3:7],  type = 'o', col = 'red', pch = 20)
+#7-6
+plot(x = wavelen_sen, y = subset(df_block_sen2,FieldID == "7-6")[,3:12],  type = 'o', xlab = "wavelenth", ylab = "reflectance", ylim = c(0,0.5), col = 'blue', main = "Plot 7-6", pch = 20)
+lines(x = wavelen_uav, y = subset(df_block_uav, FieldID == "7-6")[,3:7],  type = 'o', col = 'red', pch = 20)
+#8-8
+plot(x = wavelen_sen, y = subset(df_block_sen2,FieldID == "8-8")[,3:12],  type = 'o', xlab = "wavelenth", ylab = "reflectance", ylim = c(0,0.5), col = 'blue', main = "Plot 8-8", pch = 20)
+lines(x = wavelen_uav, y = subset(df_block_uav, FieldID == "8-8")[,3:7],  type = 'o', col = 'red', pch = 20)
+
+
 ```
 
 #Read 15m AGL UAV
@@ -194,7 +269,7 @@ for(i in 1:4){
 }
 #plot average
 par(mfrow = c(1,1))
-plot(x = wavelen_uav, y = plot_uav_43[2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = "Plot 4-3", pch = 20, ylim = c(0,0.40))
+plot(x = wavelen_uav, y = plot_uav_43[2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = "Plot 4-3 Wheat Residue", pch = 20, ylim = c(0,0.40))
 lines(x = wavelen_uav, y = plot_uav[plot_uav$plot == "4-3",2:6], col = "blue", pch = 20, type = "o")
 lines(x = wavelen_sen, y = plot_sen[plot_sen$plot == "4-3", 2:11], col = "red", pch = 20, type = "o")
 legend("topleft", legend = c("UAV at 15m","UAV at 60m","Sentinel-2"), col = c("green","blue","red"), pch = 20)
@@ -209,7 +284,7 @@ for(i in 1:3){
 }
 #plot average
 par(mfrow = c(1,1))
-plot(x = wavelen_uav, y = plot_uav_52[2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = "Plot 5-2", pch = 20, ylim = c(0,0.40))
+plot(x = wavelen_uav, y = plot_uav_52[2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = "Plot 5-2 Tomato Residue", pch = 20, ylim = c(0,0.40))
 lines(x = wavelen_uav, y = plot_uav[plot_uav$plot == "5-2",2:6], col = "blue", pch = 20, type = "o")
 lines(x = wavelen_sen, y = plot_sen[plot_sen$plot == "5-2", 2:11], col = "red", pch = 20, type = "o")
 legend("topleft", legend = c("UAV at 15m","UAV at 60m","Sentinel-2"), col = c("green","blue","red"), pch = 20)
@@ -253,18 +328,22 @@ plot(ave_asd52$wavelength, ave_asd52$reflecntace, type = "l")
 
 #plot ASD, UAV and Sentinel-2 data
 ```{r}
+#4-3
 par(mfrow = c(1,1))
-plot(x = ave_asd43$wavelength, y = ave_asd43$reflecntace, type = 'l', col = "orange", xlab = "wavelength", ylab = "reflectance", main = "Plot 4-3", ylim = c(0,1.0))
+plot(x = ave_asd43$wavelength, y = ave_asd43$reflecntace, type = 'l', col = "orange", xlab = "wavelength", ylab = "reflectance", main = "Plot 4-3 Wheat Residue", ylim = c(0,1.0))
 lines(x = wavelen_uav, y = plot_uav_43[2:6], type = "o", col = "green3",pch = 20)
 lines(x = wavelen_uav, y = plot_uav[plot_uav$plot == "4-3",2:6], col = "blue", pch = 20, type = "o")
 lines(x = wavelen_sen, y = plot_sen[plot_sen$plot == "4-3", 2:11], col = "red", pch = 20, type = "o")
 legend("topleft", legend = c("ASD","UAV at 15m","UAV at 60m","Sentinel-2"), col = c("orange","green3","blue","red"), pch = 20)
 
-
-plot(x = wavelen_uav, y = plot_uav_43[2:6], type = "o", col = "green", xlab = "wavelength", ylab = "reflectance", main = "Plot 4-3", pch = 20, ylim = c(0,0.40))
-lines(x = wavelen_uav, y = plot_uav[plot_uav$plot == "4-3",2:6], col = "blue", pch = 20, type = "o")
-lines(x = wavelen_sen, y = plot_sen[plot_sen$plot == "4-3", 2:11], col = "red", pch = 20, type = "o")
-legend("topleft", legend = c("UAV at 15m","UAV at 60m","Sentinel-2"), col = c("green","blue","red"), pch = 20)
+#5-2  not successful
+par(mfrow = c(1,1))
+plot(x = ave_asd52$wavelength, y = ave_asd52$reflecntace, type = 'l', col = "orange", xlab = "wavelength", ylab = "reflectance", main = "Plot 5-2 Tomato Residue", ylim = c(0,1.0))
+lines(x = wavelen_uav, y = plot_uav_52[2:6], type = "o", col = "green3",pch = 20)
+lines(x = wavelen_uav, y = plot_uav[plot_uav$plot == "5-2",2:6], col = "blue", pch = 20, type = "o")
+lines(x = wavelen_sen, y = plot_sen[plot_sen$plot == "5-2", 2:11], col = "red", pch = 20, type = "o")
+legend("topleft", legend = c("ASD","UAV at 15m","UAV at 60m","Sentinel-2"), col = c("orange","green3","blue","red"), pch = 20)
 
 ```
+
 
