@@ -1,0 +1,282 @@
+---
+title: "VIs for AVIRIS"
+author: "Zhehan"
+date: "December 6, 2018"
+output: html_document
+---
+
+#packages 
+```{r}
+library(raster)
+library(qdapRegex)
+library(reshape2)
+library(ggplot2)
+```
+
+#read aviris data 
+```{r}
+#list all files 
+path_aviris <- "C:/Users/tangz/Box Sync/CC_UCD_RR/AVIRIS_L2RR"
+aviris_all <- list.files(path_aviris)
+#remove other files 
+aviris_tiff <- aviris_all[-grep(".enp|.hdr|.xml", aviris_all)]
+aviris_tiff <- as.list(aviris_tiff)
+
+#read the aviris files
+#test for the rotated image
+aviris_rot <- raster::brick(file.path(path_aviris, "AVIRIS_L2RRf130803t01p00r11rdn_refl_img_corr_RRXL_rotate.dat"))
+wave_rot <- unlist(rm_between(names(aviris_rot), "...",".", extract  = TRUE))
+names(aviris_rot) <- wave_rot
+
+
+#
+aviris_ls <- lapply(aviris_tiff, function(x) {raster::brick(file.path(path_aviris, x))})
+#a <- raster::brick(file.path(path_aviris, aviris_tiff[[1]]))
+
+#change the name of the list 
+names(aviris_ls) <- unlist(aviris_tiff)
+names(aviris_ls) <- unlist(rm_between(names(aviris_ls), "RRf","t0", extract = TRUE))
+
+#check the bands: all 224
+#a <- sapply(aviris_ls, function(x){length(names(x))})
+
+#retrieve the band names of aviris
+waves <- unlist(rm_between(names(aviris_ls[[1]]), "X", ".", extract = TRUE))
+
+#replace the band names of each raster brick 
+for(i in 1:10){
+  names(aviris_ls[[i]]) = waves
+}
+
+
+```
+
+#function of vegetation indices 
+```{r}
+#Greenness 
+##NDVI
+ndvi <- function(img){
+  red <- img$X665
+  nir <- img$X831
+  ndvi <- (nir-red)/(nir+red)
+  return(ndvi)
+}
+##EVI
+evi <- function(img){
+  blue <- img$X443
+  red <- img$X665
+  nir <- img$X831
+  evi <- 2.5*(nir-red)/(nir+6*red-7.5*blue+1)
+  return(evi)
+}
+##Green Leaf Index
+gli <- function(img){
+  blue <- img$X443
+  green <- img$X550
+  red <- img$X665
+  gli <- ((green-red)+(green-blue))/(2*green+red+blue)
+  return(gli)
+}
+##GVI: green vegetation index 
+gvi <- function(img){
+  TM1 <- img$X443
+  TM2 <- img$X550
+  TM3 <- img$X665
+  TM4 <- img$X831
+  TM5 <- img$X1612
+  TM7 <- img$X2207
+  gvi <- -0.2848*TM1 - 0.2435*TM2 - 0.5436*TM3 + 0.7243*TM4+0.0840*TM5 - 0.1800*TM7
+  return(gvi)
+}
+##LAI (envi): the value should be 0-3.5
+lai <- function(img){
+  blue <- img$X443
+  red <- img$X665
+  nir <- img$X831
+  evi <- 2.5*(nir-red)/(nir+6*red-7.5*blue+1)
+  lai <- 3.618*evi - 0.118
+  return(lai)
+}
+#Pigments
+##MCARI
+mcari <- function(img){
+  p700 <- img$X704
+  p670 <- img$X675
+  p550 <- img$X550
+  mcari <- ((p700-p670)-0.2*(p700-p550))*(p700/p670)
+  return(mcari)
+}
+##MCARI improved 
+mcari2 <- function(img){
+  p800 <- img$X802
+  p670 <- img$X675
+  p550 <- img$X550
+  mcari2 <- 1.5*(2.5*(p800-p670)-1.3*(p800-p550))/sqrt((2*p800+1)^2-(6*p800-5*sqrt(p670))-0.5)
+  return(mcari2)
+}
+##Cl red edge
+clrededge <- function(img){
+  p800 <- img$X802
+  p710 <- img$X714
+  clrededge <- p800/p710 - 1
+  return(clrededge)
+}
+##NDRE
+ndre <- function(img){
+  nir <- img$X831
+  rededge <- img$X704
+  ndre <- (nir-rededge)/(nir+rededge)
+  return(ndre)
+}
+
+#Water
+##NDWI
+ndwi <- function(img){
+  p860 <- img$X860 
+  p1240 <- img$X1244
+  ndwi <- (p860-p1240)/(p860+p1240)
+  return(ndwi)
+}
+##NDII
+ndii <- function(img){
+  p819 <- img$X821
+  p1649 <- img$X1652
+  ndii <- (p819-p1649)/(p819+p1649)
+  return(ndii)
+}
+
+#Stress
+##PRI
+pri <- function(img){
+  p531 <- img$X530
+  p570 <- img$X569
+  pri <- (p531-p570)/(p531+p570)
+  return(pri)
+}
+##RVSI
+rvsi <- function(img){
+  p714 <- img$X714
+  p748 <- img$X743
+  #p752 <- img$X753
+  p733 <- img$X734
+  rvsi <- (p714+p748)/2-p733
+  return(rvsi)
+}
+#Dry matter
+##CAI
+cai <- function(img){
+  p2000 <- img$X1997
+  p2200 <- img$X2197
+  p2100 <- img$X2097
+  cai <- 0.5*(p2000+p2200)-p2100
+  return(cai)
+}
+##NDLI
+ndli <- function(img){
+  p1754 <- img$X1751
+  p1680 <- img$X1681
+  ndli <- (log(1/p1754)-log(1/p1680))/(log(1/p1754)+log(1/p1680))
+  return(ndli)
+}
+```
+
+#calculate vegetation indices 
+```{r}
+#first rescale the DN to reflectance 
+sapply(aviris_ls, function(x){summary(x$X976)})
+#the 10th already have the right reflectance 
+for(i in 1:9){
+  aviris_ls[[i]] <- aviris_ls[[i]]/10000
+}
+
+#test for the rotated image
+aviris_rot <- aviris_rot/10000
+vicalc <- function(x){stack(ndvi(x), evi(x), gli(x), gvi(x), lai(x), mcari(x), mcari2(x), clrededge(x), ndre(x), ndwi(x), ndii(x), pri(x), rvsi(x), cai(x), ndli(x))}
+vicalc2 <- function(x){stack(ndvi(x), evi(x))}
+aviris_rot_vi <- vicalc2(aviris_rot)
+a <- vicalc(aviris_ls[[1]])
+#remove all outliers not in the range of 0-1
+
+
+
+aviris_vi <- lapply(aviris_ls, function(x){stack(ndvi(x), evi(x), gli(x), gvi(x), lai(x), mcari(x), mcari2(x), clrededge(x), ndre(x), ndwi(x), ndii(x), pri(x), rvsi(x), cai(x), ndli(x))})
+#change names 
+for(i in 1:10){
+  names(aviris_vi[[i]]) <- c("NDVI", "EVI", "GLI", "GVI", "LAI", "MCARI", "MCARI2", "CLrededge", "NDRE", "NDWI","NDII", "PRI", "RVSI", "CAI", "NDLI")
+}
+
+```
+
+#Output the rasters
+```{r}
+path_output <- "C:/Users/zt92/Box Sync/CC_UCD_RR/AVIRIS_VIs"
+path_output <- "C:/Users/tangz/Box Sync/CC_UCD_RR/AVIRIS_VI_test"
+for(i in 1:10){
+  writeRaster(aviris_vi[[i]], file.path(path_output, paste0("aviris_vi_", names(aviris_vi)[i],".tif")), overwrite = TRUE)
+}
+```
+
+#Extract values from 20130803 aviris image
+```{r}
+#read shapefiles of each block with 10m buffer inside
+path_shp <- "C:/Users/tangz/Box Sync/CC_UCD_RR/Shapefiles"
+RR_block_2013 <- shapefile(file.path(path_shp, "CE_TMW_2013_intBuff2.shp"))
+
+#extract based on shapefiles 
+aviris_high <- aviris_vi$`130803`
+##NDVI
+NDVI_130803 <- raster::extract(aviris_high$NDVI, RR_block_2013)
+names(NDVI_130803) <- RR_block_2013$FieldID
+NDVI_130803 <- melt(NDVI_130803, value.name = "NDVI")
+names(NDVI_130803)[2] <- "FieldID"
+##NDWI
+NDWI_130803 <- raster::extract(aviris_high$NDWI, RR_block_2013)
+names(NDWI_130803) <- RR_block_2013$FieldID
+NDWI_130803 <- melt(NDWI_130803, value.name = "NDWI")
+names(NDWI_130803)[2] <- "FieldID"
+##RVSI
+RVSI_130803 <- raster::extract(aviris_high$RVSI, RR_block_2013)
+names(RVSI_130803) <- RR_block_2013$FieldID
+RVSI_130803 <- melt(RVSI_130803, value.name = "RVSI")
+names(RVSI_130803)[2] <- "FieldID"
+
+#Merge with other field management information 
+field_2013 <- as.data.frame(RR_block_2013)
+##subset it 
+field_2013 <- field_2013[,c("FieldID","year","block","system_cod","irrigation","cash_crop_","cash_cro_1", "cash_cro_2")]
+#merge with the VI table
+df_NDVI_130803 <- merge(NDVI_130803, field_2013, by = "FieldID")
+df_NDWI_130803 <- merge(NDWI_130803, field_2013, by = "FieldID")
+df_RVSI_130803 <- merge(RVSI_130803, field_2013, by = "FieldID")
+
+
+
+```
+
+
+
+#Boxplot by different system code
+```{r}
+##separate with maize and tomato
+df_NDVI_130803_tomato <- df_NDVI_130803[df_NDVI_130803$cash_crop_=="Tomato",]
+df_NDVI_130803_maize <- df_NDVI_130803[df_NDVI_130803$cash_crop_=="Maize",]
+df_NDWI_130803_tomato <- df_NDWI_130803[df_NDWI_130803$cash_crop_=="Tomato",]
+df_NDWI_130803_maize <- df_NDWI_130803[df_NDWI_130803$cash_crop_=="Maize",]
+df_RVSI_130803_tomato <- df_RVSI_130803[df_RVSI_130803$cash_crop_=="Tomato",]
+df_RVSI_130803_maize <- df_RVSI_130803[df_RVSI_130803$cash_crop_=="Maize",]
+
+
+#explanatory plot 
+##NDVI
+boxplot(df_NDVI_130803_tomato$NDVI~df_NDVI_130803_tomato$system_cod, main  = "20130803 Tomato NDVI")
+boxplot(df_NDVI_130803_maize$NDVI~df_NDVI_130803_maize$system_cod, main  = "20130803 Maize NDVI")
+##NDWI
+boxplot(df_NDWI_130803_tomato$NDWI~df_NDWI_130803_tomato$system_cod, main  = "20130803 Tomato NDWI")
+boxplot(df_NDWI_130803_maize$NDWI~df_NDWI_130803_maize$system_cod, main  = "20130803 Maize NDWI")
+##RVSI
+boxplot(df_RVSI_130803_tomato$RVSI~df_RVSI_130803_tomato$system_cod, main  = "20130803 Tomato RVSI")
+boxplot(df_RVSI_130803_maize$RVSI~df_RVSI_130803_maize$system_cod, main  = "20130803 Maize RVSI")
+
+
+```
+
