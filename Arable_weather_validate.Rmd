@@ -1,0 +1,238 @@
+---
+title: "Arable_weather_validate"
+author: "Zhehan"
+date: "August 6, 2019"
+output: html_document
+---
+#package
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+library(lubridate)
+library(xts)
+library(dplyr)
+library(MLmetrics)
+library(chillR)
+library(pollen)
+```
+
+#read weather data from Arable
+##daily data
+```{r}
+path_arable <- "Z:/CC_UCD_atRR/data1/Arable"
+#daily
+arable_43_daily <- read.csv(file.path(path_arable, "A001574_daily.csv"))
+arable_44_daily <- read.csv(file.path(path_arable, "A002041_daily.csv"))
+arable_51_daily <- read.csv(file.path(path_arable, "A001293_daily.csv"))
+arable_55_daily <- read.csv(file.path(path_arable, "A001418_daily.csv"))
+arable_65_daily <- read.csv(file.path(path_arable, "A001394_daily.csv"))
+arable_daily <- rbind(arable_43_daily, arable_44_daily, arable_51_daily, arable_55_daily, arable_65_daily)
+#remove these files
+rm(arable_43_daily)
+rm(arable_44_daily)
+rm(arable_51_daily)
+rm(arable_55_daily)
+rm(arable_65_daily)
+
+#add a date column 
+arable_daily$date <- sapply(sapply(as.character(arable_daily$time), function(x){strsplit(x, split=" ")}), '[',1)
+
+#subset
+##only after 06-20
+arable_daily$date <- as.Date(arable_daily$date)
+arable_daily <- subset(arable_daily, date >= "2019-06-20")
+
+names(arable_daily)
+arable_daily_weather <- arable_daily[,c("date","device","maxT", "meanT", "minT", "ET", "SWdw", "precip")]
+
+#output
+path_arable_output <- "Z:/CC_UCD_atRR/data2/Arable"
+write.csv(arable_daily_weather, file = file.path(path_arable_output, "arable_daily_weather_060719_072919.csv"), row.names = FALSE)
+```
+
+##hourly data
+```{r}
+arable_43_hourly <- read.csv(file.path(path_arable, "A001574_hourly.csv"))
+arable_44_hourly <- read.csv(file.path(path_arable, "A002041_hourly.csv"))
+arable_51_hourly <- read.csv(file.path(path_arable, "A001293_hourly.csv"))
+arable_55_hourly <- read.csv(file.path(path_arable, "A001418_hourly.csv"))
+arable_65_hourly <- read.csv(file.path(path_arable, "A001394_hourly.csv"))
+arable_hourly <- rbind(arable_43_hourly, arable_44_hourly, arable_51_hourly, arable_55_hourly, arable_65_hourly)
+
+#add a date column 
+arable_hourly$date <- sapply(sapply(as.character(arable_hourly$time), function(x){strsplit(x, split=" ")}), '[',1)
+arable_hourly$date <- as.Date(arable_hourly$date)
+
+#modify the time column 
+arable_hourly$time <- strptime(as.character(arable_hourly$time.1), format = "%Y-%m-%dT%H:%M:%SZ", tz= "utc")
+arable_hourly$time <- format(as.POSIXct(arable_hourly$time), tz = "America/Los_Angeles", usetz = TRUE)
+
+#subset
+arable_hourly <- subset(arable_hourly, date > "2019-06-20" & date < "2019-07-29")
+```
+
+#read weather data from CIMIS station 
+##daily 
+```{r}
+path_cimis <- "Z:/CC_UCD_atRR/data1/Weather/CIMIS"
+cimis_daily <- read.csv(file.path(path_cimis, "davis_20190607_20190729_daily.csv"))
+head(cimis_daily)
+names(cimis_daily)
+
+#subset
+cimis_daily <- cimis_daily[,c("Date","Stn.Name", "Max.Air.Temp..C.", "Avg.Air.Temp..C.", "Min.Air.Temp..C.","ETo..mm.","Sol.Rad..W.sq.m.", "Precip..mm.")] 
+names(cimis_daily) <- c("date", "device", "maxT", "meanT", "minT", "ET", "solrad", "precip")
+arable_daily_weather <- arable_daily[,c("date","device","maxT", "meanT", "minT", "ET", "GDD", "CGDD", "SWdw", "precip")]
+
+#subset
+#remove the last row
+cimis_daily <- na.omit(cimis_daily)
+cimis_daily$date <- as.Date(as.character(cimis_daily$date), "%m/%d/%Y")
+cimis_daily <- subset(cimis_daily, date >= "2019-06-20")
+```
+##hourly
+```{r}
+cimis_hourly <- read.csv(file.path(path_cimis, "davis_20190621_20190728_hourly.csv"))
+head(cimis_hourly)
+tail(cimis_hourly)
+
+#change format
+cimis_hourly$Date <- as.Date(as.character(cimis_hourly$Date), "%m/%d/%Y")
+cimis_hourly <- cimis_hourly[!is.na(cimis_hourly$Date),]
+
+cimis_hourly$Hour..PST. <- sapply(cimis_hourly$Hour..PST., function(x){
+  if(nchar(x)==3){x=paste0("0",x)}
+    else{x = as.character(x)}}
+  )
+cimis_hourly$time <- paste(cimis_hourly$Date, cimis_hourly$Hour..PST.)
+cimis_hourly$time <- strptime(cimis_hourly$time, format = "%Y-%m-%d %H%M")
+#subset
+cimis_hourly <- cimis_hourly[,c("Date", "Stn.Name", "Air.Temp..C")]
+```
+
+#read weather data from RR station
+##every five minutes 
+```{r}
+path_rr <- "Z:/CC_UCD_atRR/data1/Weather/RR"
+rr_Ta2m <- read.csv(file.path(path_rr, "CT_Ta2m.csv"))
+head(rr_Ta2m)
+names(rr_Ta2m) <- c("height", "id", "AirTemp", "time")
+#change rr_Ta2m
+str(rr_Ta2m)
+rr_Ta2m$time <- strptime(as.character(rr_Ta2m$time), format = "%Y-%m-%d %H:%M:%S")
+
+#subset
+rr_Ta2m <- subset(rr_Ta2m, time > "2019-06-20" & time < "2019-07-29")
+
+#add date and time 
+rr_Ta2m$date <- sapply(sapply(as.character(rr_Ta2m$time), function(x){strsplit(x, split=" ")}), '[',1)
+rr_Ta2m$time2 <- sapply(sapply(as.character(rr_Ta2m$time), function(x){strsplit(x, split=" ")}), '[',2)
+```
+##resample to hourly 
+```{r}
+rr_Ta2m_xts <- xts(rr_Ta2m$AirTemp, order.by  =rr_Ta2m$time )
+rr_Ta2m_hourly <- to.hourly(rr_Ta2m_xts)
+plot(rr_Ta2m_xts)
+
+class(rr_Ta2m_xts)
+plot(rr_Ta2m_hourly)
+
+rr_Ta2m_hourly 
+
+rr_Ta2m_hourly <- data.frame("time" = index(rr_Ta2m_hourly), "Airtemp" = as.numeric(rr_Ta2m_hourly))
+rr_Ta2m_hourly$time <- strptime(rr_Ta2m_hourly$time,  format = "%Y-%m-%d %H:%M:%S")
+```
+
+
+#intercomparison
+##daily 
+```{r}
+names(arable_daily_weather)[7]<- "solrad"  
+cimis_daily$solrad <- cimis_daily$solrad*3600/100000
+com_weather_daily <- rbind(cimis_daily, arable_daily_weather)
+unique(com_weather_daily$device)
+View(com_weather_daily)
+#remove the first and last date
+com_weather_daily <- subset(com_weather_daily, date > "2019-06-20" & date < "2019-07-29")
+
+#mean Temp
+ggplot(com_weather_daily, aes(x = date, y = meanT, group = as.factor(device))) + geom_line(size = 0.75, aes(colour = as.factor(device))) + ggtitle("Daily Average Temperature") +  theme_bw()+ scale_color_manual(values=brewer.pal(6, name = "RdBu")) + ylab("Temperature (celsius)")
+#max temp
+ggplot(com_weather_daily, aes(x = date, y = maxT, group = as.factor(device))) + geom_line(size = 0.75, aes(colour = as.factor(device))) + ggtitle("Daily Maximum Temperature") +  theme_bw()+ scale_color_manual(values=brewer.pal(6, name = "RdBu")) + ylab("Temperature (celsius)")
+#min temp
+ggplot(com_weather_daily, aes(x = date, y = minT, group = as.factor(device))) + geom_line(size = 0.75, aes(colour = as.factor(device))) + ggtitle("Daily Minimum Temperature") +  theme_bw()+ scale_color_manual(values=brewer.pal(6, name = "RdBu")) + ylab("Temperature (celsius)")
+#ET
+ggplot(com_weather_daily, aes(x = date, y = ET, group = as.factor(device))) + geom_line(size = 0.75, aes(colour = as.factor(device))) + ggtitle("Reference ET") +  theme_bw()+ scale_color_manual(values=brewer.pal(6, name = "RdBu")) + ylab("ETo (mm)")
+
+
+#RMSE of average temperature
+RMSE(subset(arable_daily_weather, device == "A001574")$meanT, cimis_daily$meanT)
+##1.353
+RMSE(subset(arable_daily_weather, device == "A002041")$meanT, cimis_daily$meanT)
+##1.124
+RMSE(subset(arable_daily_weather, device == "A001293")$meanT, cimis_daily$meanT)
+##0.899
+RMSE(subset(arable_daily_weather, device == "A001418")$meanT, cimis_daily$meanT)
+##1.17
+RMSE(subset(arable_daily_weather, device == "A001394")$meanT, cimis_daily$meanT)
+##1.23
+##On average
+a <- aggregate(arable_daily_weather$meanT, by = list(arable_daily_weather$date), mean)
+names(a) <- c("date", "meanT")
+RMSE(a$meanT, cimis_daily$meanT)
+##1.12
+
+#solar radiation
+plot(arable_daily_weather$date, arable_daily_weather$solrad, color = arable_daily_weather$device)
+ggplot(com_weather_daily, aes(x = date, y = solrad, group = as.factor(device))) + geom_line(size = 0.75, aes(colour = as.factor(device))) + ggtitle("Solar Radiation") +  theme_bw()+ scale_color_manual(values=brewer.pal(6, name = "RdBu")) + ylab("Solar Radiation")
+
+```
+##hourly air temperature
+```{r}
+#combine them all 
+com_hourly_airtemp <- data.frame("Time" = c(rr_Ta2m_hourly$time, cimis_hourly$time, arable_hourly$time), "AirTemp" = c(rr_Ta2m_hourly$Airtemp, cimis_hourly$Air.Temp..C., arable_hourly$Tair), "ID" = c(rep("RR", nrow(rr_Ta2m_hourly)), rep("CIMIS", nrow(cimis_hourly)), as.character(arable_hourly$device)))
+
+ggplot(com_hourly_airtemp, aes(x = Time, y = AirTemp, color = ID)) + geom_line(size = 0.65) + theme_minimal()
+
+#compare RR and CIMIS
+ggplot(subset(com_hourly_airtemp, ID == "RR" | ID == "CIMIS"), aes(x = Time, y = AirTemp, color = ID)) + geom_line(size = 0.75) + theme_minimal() + ylab("Air Temperature (celsius)") + ggtitle("Hourly Air Temperature")
+
+#compare Five sensors
+ggplot(subset(com_hourly_airtemp, ID != "RR" & ID != "CIMIS"), aes(x = Time, y = AirTemp, color = ID)) + geom_line(size = 0.75) + theme_minimal() + ylab("Air Temperature (celsius)") + ggtitle("Hourly Air Temperature") 
+
+#cross-comparison
+ggplot(subset(com_hourly_airtemp, ID != "CIMIS"), aes(x = Time, y = AirTemp, color = ID)) + geom_line(size = 0.75) + theme_minimal() + ylab("Air Temperature (celsius)") + ggtitle("Hourly Air Temperature") 
+
+ggplot(subset(com_hourly_airtemp, ID == "RR" | ID == "A001394"), aes(x = Time, y = AirTemp, color = ID)) + geom_line(size = 0.75) + theme_minimal() + ylab("Air Temperature (celsius)") + ggtitle("Hourly Air Temperature") 
+ggplot(subset(com_hourly_airtemp, ID == c( "A001418", "CIMIS")), aes(x = Time, y = AirTemp, color = ID)) + geom_line(size = 0.75) + theme_minimal() + ylab("Air Temperature (celsius)") + ggtitle("Hourly Air Temperature") 
+ggplot(subset(com_hourly_airtemp, ID == c( "A001418", "RR")), aes(x = Time, y = AirTemp, color = ID)) + geom_line(size = 0.75) + theme_minimal() + ylab("Air Temperature (celsius)") + ggtitle("Hourly Air Temperature") 
+
+###zoom in to a day
+ggplot(filter(com_hourly_airtemp, ID %in% c("CIMIS", "A001394") , Time>"2019-07-10" & Time < "2019-07-12" ), aes(x = Time, y = AirTemp, color = ID)) + geom_line(size = 0.75) + theme_minimal() + ylab("Air Temperature (celsius)") + ggtitle("Hourly Air Temperature") 
+
+```
+
+#Growing degree days 
+##Use CIMIS Davis daily data
+```{r}
+path_cimis <- "Z:/CC_UCD_atRR/data1/Weather/CIMIS"
+cimis_daily_gdd <- read.csv(file.path(path_cimis, "cimis_davis_20190410_20191001.csv"))
+names(cimis_daily_gdd)
+
+#subset
+cimis_daily_gdd <- cimis_daily_gdd[,c("Date","Stn.Name", "Max.Air.Temp..C.", "Avg.Air.Temp..C.", "Min.Air.Temp..C.","ETo..mm.","Sol.Rad..W.sq.m.", "Precip..mm.")] 
+names(cimis_daily_gdd) <- c("date", "device", "maxT", "meanT", "minT", "ET", "solrad", "precip")
+
+#subset
+#remove the last row
+cimis_daily_gdd <- na.omit(cimis_daily_gdd)
+cimis_daily_gdd$date <- as.Date(as.character(cimis_daily_gdd$date), "%m/%d/%Y")
+cimis_daily_gdd <- subset(cimis_daily_gdd, date >= "2019-04-19")
+
+#calculate GDD
+gdd_tomato <- pollen::gdd(tmax = cimis_daily_gdd$maxT, tmin  = cimis_daily_gdd$minT, tbase  = 10, tbase_max = 30)
+gdd_tomato <- data.frame("date"=cimis_daily_gdd$date, "GDD" = gdd_tomato)
+gdd_tomato$DOY <- lubridate::yday(gdd_tomato$date)
+
+```
+
