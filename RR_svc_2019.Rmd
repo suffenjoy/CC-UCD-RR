@@ -1,0 +1,410 @@
+---
+title: "RR_SVC_2019"
+author: "Zhehan"
+date: "October 8, 2019"
+output: html_document
+---
+#library
+```{r}
+library(spectrolab)
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(Hmisc)
+library(corrplot)
+library(ggplot2)
+library(ggsci)
+library(stringr)
+library(hsdar)
+library(rpart.plot)
+library(rattle)
+```
+
+#read svc reflectance
+```{r}
+path_svc <- "C:/Users/zt92/Box Sync/CC_UCD_RR/SVC_disease_20190711"
+sp_svc <- read_spectra(path_svc, format = "sig")
+#smooth the reflectance
+sp_sm <- spectrolab::smooth(sp_svc)
+#get the reflectance matrix
+ref_sm <- reflectance(sp_svc)
+#get the wavelength vector
+wavelen <- wavelengths(sp_svc)
+#get the names
+filename <- names(sp_sm)
+
+#split the names
+ID <- sapply(strsplit(filename, split = "_"), '[', 1)
+ID <- as.numeric(ID)
+Field <- sapply(strsplit(filename, split = "_"), '[', 2)
+Field <- as.factor(Field)
+Sample <- sapply(strsplit(filename, split = "_"), '[', 3)
+Sample <- str_remove(Sample, "S")
+Repeat <- sapply(strsplit(filename, split = "_"), '[', 4)
+Repeat <- as.numeric(Repeat)
+Class <- sapply(strsplit(filename, split = "_"), '[', 5)
+Class <- str_remove(Class, ".sig")
+Class <- as.factor(Class)
+
+#create a big data frame 
+df_svc <- data.frame(ref_sm)
+names(df_svc) <- wavelen
+df_svc$ID <- ID
+df_svc$Field <- Field
+df_svc$Sample <- Sample
+df_svc$Repeat <- Repeat
+df_svc$Class <- Class
+
+#reorder the data frame 
+df_svc <- df_svc[order(df_svc$ID),]
+```
+
+##resample to some bands that are available 
+```{r}
+#this just uses the subset instead of resampling 
+df_svc_sb <- df_svc %>% dplyr::select(ID = ID, Field = Field, Sample = Sample, Repeat = Repeat, Class = Class, R450 = "450.3",R475 = "474.8", R480 = "480.5", R531 = "531.7", R550 = "550", R560 = "559.8", R570 = "569.6", R668 = "668.4", R670 = "669.8", R700 = "699.3", R717 = "716.7", R720 = "720.6", R740 = "740.4", R800 = "799.9", R840 = "840.1", R900 = "899.5", R970 = "970.6")
+```
+
+##functions to calculate VIs
+```{r}
+#ndvi.te 
+ndvi.te <- function(df){
+  R800 = df$R800
+  R670 = df$R670
+  NDVI = (R800-R670)/(R800+R670)
+  return(NDVI)
+}
+
+#ndre1.te
+ndre1.te <- function(df){
+  R700 = df$R700
+  R800 = df$R800
+  NDRE1 = (R800-R700)/(R800+R700)
+  return(NDRE1)
+}
+
+#ndre2.te
+ndre2.te <- function(df){
+  R720 = df$R720
+  R800 = df$R800
+  NDRE2 = (R800-R720)/(R800+R720)
+  return(NDRE2)
+}
+
+#ndre3.te
+ndre3.te <- function(df){
+  R740 = df$R740
+  R800 = df$R800
+  NDRE3 = (R800-R740)/(R800+R740)
+  return(NDRE3)
+}
+
+#ndre.mi
+ndre.mi <- function(df){
+  R717 = df$R717
+  R840 = df$R840
+  NDRE = (R840-R717)/(R840+R717)
+  return(NDRE)
+}
+
+#ndvi.mi
+ndvi.mi <- function(df){
+  R840 = df$R840
+  R668 = df$R668
+  NDVI = (R840-R668)/(R840+R668)
+  return(NDVI)
+}
+
+#tcari/osavi
+tcari.osavi <- function(df){
+  R700 = df$R700
+  R670 = df$R670
+  R550 = df$R550
+  R800 = df$R800
+  TCARI = 3*((R700-R670)-0.2*(R700-R550)*(R700/R670))
+  OSAVI = (1+0.16)*(R800-R670)/(R800+R670+0.16)
+  return(TCARI/OSAVI)
+}
+
+#mcari
+mcari <- function(df){
+  R700 = df$R700
+  R670 = df$R670
+  R550 = df$R550
+  R800 = df$R800
+  MCARI = ((R700-R670)-0.2*(R700-R550))*(R700/R670)
+  return(MCARI)
+}
+
+#PRI
+pri <- function(df){
+  R531 = df$R531
+  R570 = df$R570
+  PRI = (R531-R570)/(R531+R570)
+  return(PRI)
+}
+
+#water index 
+pwi <- function(df){
+  R900 = df$R900
+  R970 = df$R970
+  PWI = R900/R970
+  return(PWI)
+}
+
+
+```
+
+##function to add VIs to the dataframe 
+```{r}
+dfw_vis <- function(dfw){
+  dfw$ndvi.te <- ndvi.te(dfw)
+  dfw$ndre1.te <- ndre1.te(dfw)
+  dfw$ndre2.te <- ndre2.te(dfw)
+  dfw$ndre3.te <- ndre3.te(dfw)
+  dfw$ndre.mi <- ndre.mi(dfw)
+  dfw$ndvi.mi <- ndvi.mi(dfw)
+  dfw$tcari.osavi <- tcari.osavi(dfw)
+  dfw$mcari <- mcari(dfw)
+  dfw$pri <- pri(dfw)
+  dfw$pwi <- pwi(dfw)
+  return(dfw)
+}
+```
+
+##add VIs to the dataframe 
+```{r}
+df_svc_sb <- dfw_vis(df_svc_sb)
+```
+
+##plot all the curves together
+```{r}
+###change the data frame from wide to long
+dfw_svc <- gather(df_svc, wavelength, reflectance, "337.5":"2515.8")
+dfw_svc <- dfw_svc[order(dfw_svc$ID),]
+dfw_svc$wavelength <- as.numeric(dfw_svc$wavelength)
+
+##calculate mean and variance
+a <- dfw_svc %>% group_by(Class, wavelength) %>% summarise(Mean = mean(reflectance), Vairance = var(reflectance))
+str(a)
+a$wavelength <- as.numeric(a$wavelength)
+
+#plot
+ggplot(a, aes(x = wavelength, y = Mean, color = Class)) + geom_line(aes(size = 2)) +ylab("Average Reflectance")+xlab("Wavelength") +
+  geom_line(data = dfw_svc, aes(x = wavelength, y = reflectance, color =  Class, alpha = 0.2, size = 0.5))
+
+ggplot(data = dfw_svc, aes(x = wavelength, y = reflectance, color = Class)) + geom_line( alpha = 0.2, size = 0.2)+ylab("Average Reflectance")+xlab("Wavelength")+ geom_line(data = a, aes(x = wavelength, y = Mean, color = Class))
+```
+
+
+#binary classification 
+##subset to different 
+```{r}
+df_svc_sb$Class
+df_svc_sb_h <- subset(df_svc_sb, Class == "Health")
+df_svc_sb_b <- subset(df_svc_sb, Class == "Blight")
+df_svc_sb_p <- subset(df_svc_sb, Class == "PWM")
+```
+
+#compare with the severity measured by photos
+##visualization
+```{r}
+par(mfrow = c(3,3))
+plot(df_svc_sb$Class, df_svc_sb$R450, main = "R450")
+plot(df_svc_sb$Class, df_svc_sb$R475, main = "R475")
+plot(df_svc_sb$Class, df_svc_sb$R480, main = "R480")
+plot(df_svc_sb$Class, df_svc_sb$R531, main = "R531")
+plot(df_svc_sb$Class, df_svc_sb$R550, main = "R550")
+plot(df_svc_sb$Class, df_svc_sb$R560, main = "R560")
+plot(df_svc_sb$Class, df_svc_sb$R570, main = "R570")
+plot(df_svc_sb$Class, df_svc_sb$R668, main = "R668")
+plot(df_svc_sb$Class, df_svc_sb$R670, main = "R670")
+plot(df_svc_sb$Class, df_svc_sb$R700, main = "R700")
+plot(df_svc_sb$Class, df_svc_sb$R717, main = "R717")
+plot(df_svc_sb$Class, df_svc_sb$R720, main = "R720")
+plot(df_svc_sb$Class, df_svc_sb$R740, main = "R740")
+plot(df_svc_sb$Class, df_svc_sb$R800, main = "R800")
+plot(df_svc_sb$Class, df_svc_sb$R840, main = "R840")
+plot(df_svc_sb$Class, df_svc_sb$R900, main = "R900")
+plot(df_svc_sb$Class, df_svc_sb$R970, main = "R970")
+
+
+
+
+
+
+
+
+
+
+```
+##quantification
+```{r}
+test_aov <- aov(ndvi.te ~ Class, data = df_svc_sb)
+summary(test_aov)
+TukeyHSD(test_aov)
+```
+
+#classification
+##overview
+```{r}
+ggplot(df_svc_sb, aes(x = Class, fill = Class)) + geom_bar(stat=  "count") + ylab("Count") 
+```
+##preprocessing
+```{r}
+#correlation
+cor_sb <- cor(df_svc_sb[,6:32])
+par(mfrow = c(1,1))
+corrplot(cor_sb, method = "color")
+
+#set a threshold for feature selection 
+highcor_sb <- findCorrelation(cor_sb, cutoff = 0.9, verbose = TRUE)
+```
+
+##split 
+###training dataset and testing dataset
+```{r}
+set.seed(7)
+Train_index <- createDataPartition(df_svc_sb$Class, p = 0.6, list=  FALSE)
+#training data
+train_svc_sb <- df_svc_sb[Train_index, ]
+#testing data
+test_svc_sb <- df_svc_sb[-Train_index, ]
+
+```
+###different columns
+```{r}
+train_svc_mi <- train_svc_sb[,c("ID","Field","Sample","Repeat","Class","R475", "R560", "R668", "R840", "R717", "ndvi.mi", "ndre.mi")]
+test_svc_mi <- test_svc_sb[,c("ID","Field","Sample","Repeat","Class","R475", "R560", "R668", "R840", "R717", "ndvi.mi", "ndre.mi")]
+
+train_svc_te <- train_svc_sb[,c("ID","Field","Sample","Repeat","Class","R450", "R480", "R531", "R550", "R570", "R670", "R700", "R720", "R740", "R800", "R900", "R970", "ndvi.te","ndre1.te", "ndre2.te", "ndre3.te", "tcari.osavi","mcari","pri","pwi")]
+test_svc_te <- test_svc_sb[,c("ID","Field","Sample","Repeat","Class","R450", "R480", "R531", "R550", "R570", "R670", "R700", "R720", "R740", "R800", "R900", "R970", "ndvi.te","ndre1.te", "ndre2.te", "ndre3.te", "tcari.osavi","mcari","pri","pwi")]
+
+```
+##training
+###random forest
+```{r}
+#training parameter
+trainCon <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
+#with 5 bands and 2 VIs
+RFmodel_mi <- train(Class~., data  = train_svc_mi[,5:12], method = "rf", trControl = trainCon, importance = TRUE, tunelength = 10)
+print(RFmodel_mi)
+varImp(RFmodel_mi)
+plot(varImp(RFmodel_mi))
+pred_RFmodel_mi <- predict(RFmodel_mi, test_svc_mi)
+confusionMatrix(pred_RFmodel_mi, test_svc_mi$Class)
+
+#with 5 bands only 
+RFmodel_mi.2 <- train(Class~., data  = train_svc_mi[,5:10], method = "rf", trControl = trainCon, importance = TRUE, tunelength = 10)
+print(RFmodel_mi.2)
+varImp(RFmodel_mi.2)
+pred_RFmodel_mi.2 <- predict(RFmodel_mi.2, test_svc_mi)
+confusionMatrix(pred_RFmodel_mi, test_svc_mi$Class)
+
+
+```
+###LDA
+```{r}
+trainCon <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+LDAmodel_mi <- train(Class~., data  = train_svc_mi[,5:12], method = "lda", trControl = trainCon, tunelength = 10)
+pred_LDAmodel_mi <- predict(LDAmodel_mi, test_svc_mi)
+confusionMatrix(pred_LDAmodel_mi, test_svc_mi$Class)
+
+LDAmodel_mi.2 <- train(Class~., data  = train_svc_mi[,5:10], method = "lda", trControl = trainCon, tunelength = 10)
+pred_LDAmodel_mi.2 <- predict(LDAmodel_mi.2, test_svc_mi)
+confusionMatrix(pred_LDAmodel_mi.2, test_svc_mi$Class)
+
+```
+###SVM
+```{r}
+trainCon <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
+SVMLmodel_mi <- train(Class~., data  = train_svc_mi[,5:12], method = "svmLinear", trControl = trainCon, tunelength = 10)
+pred_SVMLmodel_mi <- predict(SVMLmodel_mi, test_svc_mi)
+confusionMatrix(pred_SVMLmodel_mi, test_svc_mi$Class)
+varImp(SVMLmodel_mi)
+
+SVMLmodel_mi.2 <- train(Class~., data  = train_svc_mi[,5:10], method = "svmLinear", trControl = trainCon, tunelength = 10)
+pred_SVMLmodel_mi.2 <- predict(SVMLmodel_mi.2, test_svc_mi)
+confusionMatrix(pred_SVMLmodel_mi.2, test_svc_mi$Class)
+
+```
+
+
+###Decision tree
+```{r}
+trainCon <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
+dtreemodel_mi <- train(form = Class~., data = train_svc_mi[,5:12], method = "rpart", trControl = trainCon,  parms = list(split = "information"))
+rpart.plot(dtreemodel_mi$finalModel)
+pred_dtreemodel_mi <- predict(dtreemodel_mi, test_svc_mi)
+confusionMatrix(pred_dtreemodel_mi, test_svc_mi$Class)
+
+dtreemodel_mi.2 <- train(form = Class~., data = train_svc_mi[,5:10], method = "rpart", trControl = trainCon,  parms = list(split = "information"))
+rpart.plot(dtreemodel_mi.2$finalModel)
+pred_dtreemodel_mi.2 <- predict(dtreemodel_mi.2, test_svc_mi)
+confusionMatrix(pred_dtreemodel_mi.2, test_svc_mi$Class)
+
+```
+
+
+#Mapping
+##read uav images
+```{r}
+read_uav <- function(path, stacks){
+  #read raster layer, and crop with the extent
+  uav_stacks <- raster::brick(file.path(path, stacks))
+  #rename the bands
+  names(uav_stacks) <- c("blue","green","red","rededge","nir","ndvi")
+  
+  return(uav_stacks)
+}
+
+path_stacks <- "Z:/CC_UCD_atRR/data2/UAV/stacks"
+uav_20190718 <- read_uav(path_stacks, "RR_20190718_stacks2.tif")
+```
+##add ndre map
+```{r}
+#NDRE = (R840-R717)/(R840+R717)
+uav_20190718$ndre <- (uav_20190718$nir - uav_20190718$rededge)/((uav_20190718$nir + uav_20190718$rededge))
+
+```
+##select vegetation areas
+```{r}
+ndvi_threshold <- 0.5
+veg_20190718 <- calc(uav_20190718$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+
+#mask 
+uav_20190718_mask <- raster::mask(uav_20190718, veg_20190718)
+```
+##map with the trained decision tree model
+```{r}
+names(uav_20190718_mask) <- c("R475","R560","R668","R717","R840","ndvi.mi","ndre.mi")
+uav_20190718_dis <- predict(uav_20190718_mask, dtreemodel_mi)
+uav_20190718_dis_rf <- predict(uav_20190718_mask, RFmodel_mi)
+
+#path output
+#path_output <- "Z:/CC_UCD_atRR/data2/UAV/Outputs"
+#writeRaster(uav_20190718_dis, file.path(path_output, "uav_20190718_disease.tif"))
+
+
+#plot
+##decision tree
+plot(uav_20190718_dis, col = c("red","green","blue"), legend = FALSE, main = "Decision Tree Classification")
+legend("topleft",legend = c("Blight","Health","PWM"), fill = c("red","green","blue"))
+hist(uav_20190718_dis)
+##random forest 
+plot(uav_20190718_dis_rf, col = c("red","green","blue"), legend = FALSE, main = "Random Forest Classification")
+legend("topleft",legend = c("Blight","Health","PWM"), fill = c("red","green","blue"))
+hist(uav_20190718_dis)
+
+```
+
+#hsdar package
+##spectral resampling
+```{r}
+a <- get.sensor.characteristics("RapidEye", TRUE)
+plot(c(0,1)~c(330, 1200), type = "n")
+```
+
