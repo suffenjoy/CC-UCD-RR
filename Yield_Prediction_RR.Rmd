@@ -15,62 +15,49 @@ library(ggplot2)
 #Multi-year field data 
 ```{r}
 path_yield <- "Z:/CC_UCD_atRR/data2/GIS"
-tomyld2019 <- read_excel(file.path(path_yield, "tomyld2019_jaylee.xlsx"))
-dim(tomyld2019)
-names(tomyld2019)[7] <- "Yeild"
+tomall9419 <- read.csv(file.path(path_yield,"tomato_yld_geospat_1994_2019 (20191112).csv"))
+head(tomall9419)
+tomall9419$cash_crop_planned <- NULL
+tomall9419$cash_crop_planted <- NULL
+names(tomall9419)[7:11] <- c("plant_date","harv_date","yield","greenDM","vineDM")
 
-#aggregate 
-##plot average
-tomyld2019_plotagg <- aggregate(tomyld2019$Yeild, by = list(tomyld2019$plot_code, tomyld2019$system_code), mean)
-names(tomyld2019_plotagg)  <- c("plot_code", "system_code", "Yield")
+#change class
+str(tomall9419)
+tomall9419$plant_date <- as.Date(as.character(tomall9419$plant_date),"%m/%d/%Y")
+tomall9419$harv_date <- as.Date(as.character(tomall9419$harv_date),"%m/%d/%Y")
+tomall9419$block <- as.factor(tomall9419$block)
 
-#historical yield data
-tomyld19942017 <- read.csv(file.path(path_yield, "tomato_yld_geospat.csv"))
-names(tomyld19942017)
-str(tomyld19942017)
-unique(tomyld19942017$plot_code)
-unique(tomyld19942017$system_code)
+#only the yield matters 
+tomyld9419 <- tomall9419[,c(1:9)]
+tomyld9419 <- na.omit(tomyld9419)
 
-#cleaning 
-##remove two columns 
-tomyld19942017$cash_crop_planned <- NULL
-tomyld19942017$cash_crop_planted <- NULL
-##change names 
-names(tomyld19942017)[7:11] <- c("plant_date","harv_date","yield","greenDM","vineDM")
-##change class 
-tomyld19942017$plant_date <- as.Date(as.character(tomyld19942017$plant_date))
-tomyld19942017$harv_date <- as.Date(as.character(tomyld19942017$harv_date))
-tomyld19942017$block <- as.factor(tomyld19942017$block)
-##remove NAs 
-tomyld19942017_cl <- na.omit(tomyld19942017)
-##remove zeros 
-tomyld19942017_cl[tomyld19942017_cl==0] <- NA
-tomyld19942017_cl <- na.omit(tomyld19942017_cl)
-##remove 2017's data 
-tomyld19942017_cl <- subset(tomyld19942017_cl, year!=2017)
-
-#aggregate 
-tomyld19942017_plotagg <- aggregate(tomyld19942017$yield, by = list(tomyld19942017$year, tomyld19942017$plot_code, tomyld19942017$system_code), mean)
-names(tomyld19942017_plotagg) <- c("year","plot_code", "system_code","yield")
-
-tomyld19942017_cl_plotagg <- aggregate(tomyld19942017_cl[,9:11], by = list(tomyld19942017_cl$year, tomyld19942017_cl$plot_code, tomyld19942017_cl$block, tomyld19942017_cl$system_code, tomyld19942017_cl$irrigation, tomyld19942017_cl$plant_date, tomyld19942017_cl$harv_date),mean)
-head(tomyld19942017_cl_plotagg)
-names(tomyld19942017_cl_plotagg) <- c("year", "plot_code","block","system_code","irrigation","plant_date","harv_date","yield","greenDM","vineDM")
+#aggregate to the plot 
+tomyld9419_plotagg <- aggregate(tomyld9419$yield, by = list(tomyld9419$year, tomyld9419$plot_code, tomyld9419$block, tomyld9419$system_code, tomyld9419$irrigation, tomyld9419$plant_date, tomyld9419$harv_date), mean)
+head(tomyld9419_plotagg)
+names(tomyld9419_plotagg) <- c("year","plot_code","block","system_code","irrigation","plant_date","harv_date","yield")
+#include the DM
+tomall9419_cl <- na.omit(tomall9419)
+names(tomall9419_cl)
+tomall9419_cl_plotagg <- aggregate(tomall9419_cl[,9:11], by = list(tomall9419_cl$year, tomall9419_cl$plot_code, tomall9419_cl$block, tomall9419_cl$system_code, tomall9419_cl$irrigation, tomall9419_cl$plant_date, tomall9419_cl$harv_date), mean)
+names(tomall9419_cl_plotagg)[1:7] <- c("year","plot_code","block","system_code","irrigation","plant_date","harv_date")
 ```
+
 
 #Exploratory Plots
 ##Yield vs system_code
 ```{r}
-ggplot(tomyld19942017, aes(y = yield, x = system_code, col = system_code)) + geom_boxplot()
+#without plot aggregation
+ggplot(tomyld9419, aes(x = system_code, y = yield, col = system_code)) + geom_boxplot()
+ggplot(tomall9417, aes(y = yield, x = system_code, col = system_code)) + geom_boxplot()
 
-ggplot(tomyld19942017_plotagg, aes(x = system_code, y = yield)) + geom_boxplot()
+ggplot(tomall9417_plotagg, aes(x = system_code, y = yield)) + geom_boxplot()
 ```
 
 ##Harvest Index
 ```{r}
-ggplot(tomyld19942017_cl, aes(x = greenDM, y = yield, col = system_code)) + geom_point() + geom_smooth(method = lm, se = FALSE) + xlim(c(0,5000))
+ggplot(tomall9417_cl, aes(x = greenDM, y = yield, col = system_code)) + geom_point() + geom_smooth(method = lm, se = FALSE) + xlim(c(0,5000))
 
 
-cor(tomyld19942017_cl_plotagg$yield, tomyld19942017_cl_plotagg$vineDM)
+cor(tomall9417_cl_plotagg$yield, tomall9417_cl_plotagg$vineDM)
 ```
 
