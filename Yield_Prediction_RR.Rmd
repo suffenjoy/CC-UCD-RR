@@ -40,6 +40,8 @@ tomall9419_cl <- na.omit(tomall9419)
 names(tomall9419_cl)
 tomall9419_cl_plotagg <- aggregate(tomall9419_cl[,9:11], by = list(tomall9419_cl$year, tomall9419_cl$plot_code, tomall9419_cl$block, tomall9419_cl$system_code, tomall9419_cl$irrigation, tomall9419_cl$plant_date, tomall9419_cl$harv_date), mean)
 names(tomall9419_cl_plotagg)[1:7] <- c("year","plot_code","block","system_code","irrigation","plant_date","harv_date")
+#remove all data that have greenDM in 2017 and 2018
+tomall9417_cl <- subset(tomall9419_cl, year!=2018 & year!=2017)
 ```
 
 
@@ -47,7 +49,7 @@ names(tomall9419_cl_plotagg)[1:7] <- c("year","plot_code","block","system_code",
 ##Yield vs system_code
 ```{r}
 #without plot aggregation
-ggplot(tomyld9419, aes(x = system_code, y = yield, col = system_code)) + geom_boxplot()
+ggplot(tomyld9419, aes(x = system_code, y = yield, col = system_code)) + geom_boxplot() + 
 ggplot(tomall9417, aes(y = yield, x = system_code, col = system_code)) + geom_boxplot()
 
 ggplot(tomall9417_plotagg, aes(x = system_code, y = yield)) + geom_boxplot()
@@ -55,9 +57,20 @@ ggplot(tomall9417_plotagg, aes(x = system_code, y = yield)) + geom_boxplot()
 
 ##Harvest Index
 ```{r}
-ggplot(tomall9417_cl, aes(x = greenDM, y = yield, col = system_code)) + geom_point() + geom_smooth(method = lm, se = FALSE) + xlim(c(0,5000))
+ggplot(tomall9417_cl, aes(x = greenDM, y = yield, col = system_code)) + geom_point() + geom_smooth(method = lm, se = FALSE)
 
 
-cor(tomall9417_cl_plotagg$yield, tomall9417_cl_plotagg$vineDM)
+cor(tomall9417_cl$greenDM, tomall9417_cl$yield)^2
+cor(tomall9417_cl$vineDM, tomall9417_cl$yield)^2
+
+tomall1317 <- subset(tomall9417_cl, year>2013 & year < 2017)
+cor(tomall1317$yield, tomall1317$greenDM)^2
+cor(tomall1317$yield, tomall1317$vineDM)^2
+
+a <- split(tomall9417_cl, tomall9417_cl$system_code)
+sapply(a, function(x){cor(x$greenDM, x$yield)^2})
+sapply(a, function(x){cor(x$vineDM, x$yield)^2})
+sapply(a, function(x){cor(x$greenDM+x$vineDM, x$yield)^2})
+
 ```
 

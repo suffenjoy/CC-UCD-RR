@@ -1,0 +1,1708 @@
+---
+title: "Arable_uav_validate"
+author: "Zhehan"
+date: "August 7, 2019"
+output: html_document
+---
+
+#package
+```{r}
+library(raster)
+library(ggplot2)
+library(MLmetrics)
+library(tidyr)
+library(reshape2)
+library(lubridate)
+library(readxl)
+library(HarmonicRegression)
+library(gridExtra)
+library(signal)
+library(imputeTS)
+```
+
+#read NDVI and CI from Arable daily data
+```{r}
+path_arable <- "Z:/CC_UCD_atRR/data1/Arable"
+#daily
+arable_43_daily <- read.csv(file.path(path_arable, "A001574_daily.csv"))
+arable_44_daily <- read.csv(file.path(path_arable, "A002041_daily.csv"))
+arable_51_daily <- read.csv(file.path(path_arable, "A001293_daily.csv"))
+arable_55_daily <- read.csv(file.path(path_arable, "A001418_daily.csv"))
+arable_65_daily <- read.csv(file.path(path_arable, "A001394_daily.csv"))
+arable_daily <- rbind(arable_43_daily, arable_44_daily, arable_51_daily, arable_55_daily, arable_65_daily)
+#remove these files
+rm(arable_43_daily)
+rm(arable_44_daily)
+rm(arable_51_daily)
+rm(arable_55_daily)
+rm(arable_65_daily)
+
+#add a date column 
+arable_daily$date <- sapply(sapply(as.character(arable_daily$time), function(x){strsplit(x, split=" ")}), '[',1)
+
+#subset
+##only after 06-20
+arable_daily$date <- as.Date(arable_daily$date)
+arable_daily <- subset(arable_daily, date > "2019-06-20"  )
+
+#chlorophyll index and ndvi
+names(arable_daily)
+arable_daily_pl <- arable_daily[,c("date","device","Cl", "NDVI", "LfAirDelta", "Kc")]
+```
+
+#plot of NDVI and Cl
+```{r}
+ggplot(arable_daily_pl, aes(x  = date, y = NDVI, color = Field)) + geom_line(size = 0.75) + geom_point() + ggtitle("NDVI from Arable Marks") + theme_light()
+ggplot(arable_daily_pl, aes(x  = date, y = Cl, color = Field)) + geom_line(size = 0.75) + geom_point() + ggtitle("Chlorophyll Index from Arable Marks") + theme_light() + ylab("Chlorophyll Index")
+
+ggplot(arable_daily_pl, aes(x  = date, y = Kc, color = as.factor(device))) + geom_line(size = 0.75) + geom_point() + ggtitle("Crop coefficient from Arable Marks") + theme_light() + ylab("Kc")
+
+ggplot(arable_daily_pl, aes(x  = date, y = LfAirDelta, color = as.factor(device))) + geom_line(size = 0.75) + geom_point() + ggtitle("Leaf Air Temperature Delta from Arable Marks") + theme_light() + ylab("LfAirDelta")
+
+```
+
+
+#read UAV image
+##functions 
+```{r}
+read_uav <- function(path, stacks){
+  #read raster layer, and crop with the extent
+  uav_stacks <- raster::brick(file.path(path, stacks))
+  #rename the bands
+  names(uav_stacks) <- c("blue","green","red","rededge","nir","ndvi")
+  
+  return(uav_stacks)
+}
+```
+
+##read stack files
+```{r}
+path_stacks <- "Z:/CC_UCD_atRR/data2/UAV/stacks"
+uav_20190523 <- read_uav(path_stacks, "RR_20190523_stacks2.tif")
+uav_20190530 <- read_uav(path_stacks, "RR_20190530_stacks2.tif")
+uav_20190606 <- read_uav(path_stacks, "RR_20190606_stacks2.tif")
+uav_20190614 <- read_uav(path_stacks, "RR_20190614_stacks2.tif")
+uav_20190620 <- read_uav(path_stacks, "RR_20190620_stacks2.tif")
+uav_20190626 <- read_uav(path_stacks, "RR_20190626_stacks2.tif")
+uav_20190703 <- read_uav(path_stacks, "RR_20190703_stacks2.tif")
+uav_20190718 <- read_uav(path_stacks, "RR_20190718_stacks2.tif")
+uav_20190725 <- read_uav(path_stacks, "RR_20190725_stacks.tif")
+uav_20190801 <- read_uav(path_stacks, "RR_20190801_stacks2.tif")
+uav_20190808 <- read_uav(path_stacks, "RR_20190808_stacks2.tif")
+uav_20190814 <- read_uav(path_stacks, "RR_20190814_stacks2.tif")
+uav_20190822 <- read_uav(path_stacks, "RR_20190822_stacks2.tif")
+
+therm_20190620 <- raster(file.path(path_stacks, "RR_20190620_thermal2.tif"))
+therm_20190626 <- raster(file.path(path_stacks, "RR_20190626_thermal2.tif"))
+therm_20190703 <- raster(file.path(path_stacks, "RR_20190703_thermal2.tif"))
+therm_20190718 <- raster(file.path(path_stacks, "RR_20190718_thermal2.tif"))
+
+```
+
+
+#Read shapefiles
+```{r}
+path_shp <- "Z:/CC_UCD_atRR/data2/UAV/shapefiles"
+arable_adj <- shapefile(file.path(path_shp, "ArableMarks_2019_adj.shp"))
+arable_adj
+arable_adj$Plot <- c("5-1", "4-3", "4-4", "5-5", "6-5")
+arable_adj$Comment <- NULL
+
+AraFov_adj <- shapefile(file.path(path_shp, "ArableFov_2019_adj.shp"))
+
+
+FieldBounds5 <- shapefile(file.path(path_shp, "FieldBounds_2019UAV.shp"))
+FieldBounds5_buff <- shapefile(file.path(path_shp, "FieldBounds_2019UAV_buffer.shp"))
+
+#15m buffer out of the center
+Cen5_buff <- shapefile(file.path(path_shp, "RR_center_15mbuffer_5tomato_2019.shp"))
+```
+
+#extract 
+##function
+```{r}
+ref_extract <- function(uav, shp, FUN){
+  ext_uav <- raster::extract(uav, shp, fun = FUN, na.rm = TRUE, df= TRUE, buffer = 0)
+  ext_uav$Field <- shp$Plot
+  return(ext_uav)
+}
+```
+##extraction
+```{r}
+aramean_uav_20190523 <- ref_extract(uav_20190523, AraFov_adj, mean)
+aramean_uav_20190523$date <- as.Date("2019-05-23")
+aramean_uav_20190530 <- ref_extract(uav_20190530, AraFov_adj, mean)
+aramean_uav_20190530$date <- as.Date("2019-05-30")
+
+aramean_uav_20190614 <- ref_extract(uav_20190614, AraFov_adj, mean)
+aramean_uav_20190614$date <- as.Date("2019-06-14")
+
+aramean_uav_20190620 <- ref_extract(uav_20190620, AraFov_adj, mean)
+aramean_uav_20190620$date <- as.Date("2019-06-20")
+aramean_uav_20190626 <- ref_extract(uav_20190626, AraFov_adj, mean)
+aramean_uav_20190626$date <- as.Date("2019-06-26")
+aramean_uav_20190703 <- ref_extract(uav_20190703, AraFov_adj, mean)
+aramean_uav_20190703$date <- as.Date("2019-07-03")
+aramean_uav_20190718 <- ref_extract(uav_20190718, AraFov_adj, mean)
+aramean_uav_20190718$date <- as.Date("2019-07-18")
+#aramean_uav_20190725 <- ref_extract(uav_20190725, AraFov_adj, mean)
+#aramean_uav_20190725$date <- as.Date("2019-07-25")
+aramean_uav_20190801 <- ref_extract(uav_20190801, AraFov_adj, mean)
+aramean_uav_20190801$date <- as.Date("2019-08-01")
+aramean_uav_20190808 <- ref_extract(uav_20190808, AraFov_adj, mean)
+aramean_uav_20190808$date <- as.Date("2019-08-08")
+aramean_uav_20190814 <- ref_extract(uav_20190814, AraFov_adj, mean)
+aramean_uav_20190814$date <- as.Date("2019-08-14")
+aramean_uav_20190822 <- ref_extract(uav_20190822, AraFov_adj, mean)
+aramean_uav_20190822$date <- as.Date("2019-08-22")
+
+aramean_uav <- rbind(aramean_uav_20190523, aramean_uav_20190530,aramean_uav_20190614,aramean_uav_20190620, aramean_uav_20190626, aramean_uav_20190703, aramean_uav_20190718,  aramean_uav_20190801, aramean_uav_20190808, aramean_uav_20190814, aramean_uav_20190822)
+```
+##calculate some vegetation indices 
+###functions
+```{r}
+NDRE <- function(uav){
+  red <- uav$red
+  rededge <- uav$rededge
+  return((rededge-red)/(rededge+red))
+}
+
+NDRE2 <- function(uav){
+  nir <- uav$nir
+  rededge <- uav$rededge
+  return((nir-rededge)/(nir+rededge))
+}
+
+CI1 <- function(uav){
+  rededge <- uav$rededge
+  nir <- uav$nir
+  return(nir/rededge-1)
+}
+```
+###add the indices
+```{r}
+aramean_uav$ndre <- NDRE(aramean_uav)
+aramean_uav$ndre2 <- NDRE2(aramean_uav)
+aramean_uav$ci1 <- CI1(aramean_uav)
+
+aramean_uav$Field <- ordered(aramean_uav$Field, levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+```
+
+#compare the ndvi from uav and arable
+```{r}
+head(arable_daily_pl)
+#add the field number
+device_field <- data.frame("device" = unique(arable_daily$device), "Field" = as.factor(c("4-3", "4-4", "5-1", "5-5", "6-5")))
+arable_daily_pl <- merge(arable_daily_pl, device_field, by = "device")
+
+#combine 
+ggplot(arable_daily_pl, aes(x  = date, y = NDVI, color = Field)) + geom_line(size = 0.75)  + ggtitle("NDVI from Arable Marks and UAV") + theme_light() + geom_point(data = aramean_uav, aes(x = date, y = ndvi, color =  Field)) + ylim(0.5,0.9)
+
+
+#chlorophyll content
+#ggplot(arable_daily_pl, aes(x  = date, y = Cl, color = Field)) + geom_line(size = 0.75)  + ggtitle("Chlorophyll Index from Arable Marks and UAV") + theme_light() + geom_point(data = aramean_uav, aes(x = date, y = ci1, color =  Field)) + ylim(0.5,0.9)
+
+
+
+#calculate RMSE
+arab_uav <- merge(arable_daily_pl, aramean_uav, by = c("date","Field"))
+unique(arab_uav)
+
+RMSE(arab_uav$NDVI, arab_uav$ndvi)
+arab_uav$deltaNDVI <- arab_uav$ndvi- arab_uav$NDVI
+
+```
+
+#read hourly Arable data
+```{r}
+#first period
+arable_43_hourly <- read.csv(file.path(path_arable, "A001574_hourly_062019_072819.csv"))
+arable_44_hourly <- read.csv(file.path(path_arable, "A002041_hourly_062019_072819.csv"))
+arable_51_hourly <- read.csv(file.path(path_arable, "A001293_hourly_062019_072819.csv"))
+arable_55_hourly <- read.csv(file.path(path_arable, "A001418_hourly_062019_072819.csv"))
+arable_65_hourly <- read.csv(file.path(path_arable, "A001394_hourly_062019_072819.csv"))
+arable_hourly <- rbind(arable_43_hourly, arable_44_hourly, arable_51_hourly, arable_55_hourly, arable_65_hourly)
+
+#add a date column 
+arable_hourly$date <- sapply(sapply(as.character(arable_hourly$time), function(x){strsplit(x, split=" ")}), '[',1)
+arable_hourly$date <- as.Date(arable_hourly$date)
+
+#modify the time column 
+arable_hourly$time <- strptime(as.character(arable_hourly$time.1), format = "%Y-%m-%dT%H:%M:%SZ", tz= "utc")
+arable_hourly$time <- format(as.POSIXct(arable_hourly$time), tz = "America/Los_Angeles", usetz = TRUE)
+
+#subset
+arable_hourly1 <- subset(arable_hourly, date > "2019-06-20" & date < "2019-07-29")
+#remove the time.1 column
+arable_hourly1$time.1 <- NULL
+
+#second period 
+#first period
+arable_43_hourly <- read.csv(file.path(path_arable, "A001574_hourly_072919_083119.csv"))
+arable_44_hourly <- read.csv(file.path(path_arable, "A002041_hourly_072919_083119.csv"))
+arable_51_hourly <- read.csv(file.path(path_arable, "A001293_hourly_072919_083119.csv"))
+arable_55_hourly <- read.csv(file.path(path_arable, "A001418_hourly_072919_083119.csv"))
+arable_65_hourly <- read.csv(file.path(path_arable, "A001394_hourly_072919_083119.csv"))
+arable_hourly <- rbind(arable_43_hourly, arable_44_hourly, arable_51_hourly, arable_55_hourly, arable_65_hourly)
+
+#add a date column 
+arable_hourly$date <- sapply(sapply(as.character(arable_hourly$time), function(x){strsplit(x, split="T")}), '[',1)
+arable_hourly$date <- as.Date(arable_hourly$date)
+
+#modify the time column 
+arable_hourly$time <- strptime(as.character(arable_hourly$time), format = "%Y-%m-%dT%H:%M:%SZ", tz= "utc")
+arable_hourly$time <- format(as.POSIXct(arable_hourly$time), tz = "America/Los_Angeles", usetz = TRUE)
+#subset
+arable_hourly2 <- subset(arable_hourly, date >= "2019-07-29" & date <= "2019-08-31")
+
+#combine two time periods
+arable_hourly <- rbind(arable_hourly1, arable_hourly2)
+```
+
+#aggregate hourly data to daily by using the noon average
+##calculate reflectance 
+```{r}
+head(arable_hourly)
+
+#reflectance
+arable_hourly$B1ref <- arable_hourly$B1uw/arable_hourly$B1dw
+arable_hourly$B2ref <- arable_hourly$B2uw/arable_hourly$B2dw
+arable_hourly$B3ref <- arable_hourly$B3uw/arable_hourly$B3dw
+arable_hourly$B4ref <- arable_hourly$B4uw/arable_hourly$B4dw
+arable_hourly$B5ref <- arable_hourly$B5uw/arable_hourly$B5dw
+arable_hourly$B6ref <- arable_hourly$B6uw/arable_hourly$B6dw
+arable_hourly$B7ref <- arable_hourly$B7uw/arable_hourly$B7dw
+
+```
+##calculate vegetation indices 
+```{r}
+arable_hourly$Ndvi <- (arable_hourly$B6ref - arable_hourly$B4ref)/(arable_hourly$B6ref + arable_hourly$B4ref)
+```
+
+
+#Read calibrated Arable daily data
+```{r}
+aracal_44_daily <- read_excel(file.path(path_arable, "ClimateCorp_RusselRanch_2019.xlsx"), sheet = "A002041")
+aracal_44_daily$date <- as.Date(aracal_44_daily$date)
+aracal_44_daily <- subset(aracal_44_daily, date >= "2019-06-20")
+aracal_44_daily$Field <- "4-4"
+
+aracal_55_daily <- read_excel(file.path(path_arable, "ClimateCorp_RusselRanch_2019.xlsx"), sheet = "A001418")
+aracal_55_daily$date <- as.Date(aracal_55_daily$date)
+aracal_55_daily <- subset(aracal_55_daily, date >= "2019-06-20")
+aracal_55_daily$Field <- "5-5"
+
+aracal_43_daily <- read_excel(file.path(path_arable, "ClimateCorp_RusselRanch_2019.xlsx"), sheet = "A001574")
+aracal_43_daily$date <- as.Date(aracal_43_daily$date)
+aracal_43_daily <- subset(aracal_43_daily, date >= "2019-06-20")
+aracal_43_daily$Field <- "4-3"
+
+aracal_65_daily <- read_excel(file.path(path_arable, "ClimateCorp_RusselRanch_2019.xlsx"), sheet = "A001394")
+aracal_65_daily$date <- as.Date(aracal_65_daily$date)
+aracal_65_daily <- subset(aracal_65_daily, date >= "2019-06-20")
+aracal_65_daily$Field <- "6-5"
+
+
+aracal_51_daily <- read_excel(file.path(path_arable, "ClimateCorp_RusselRanch_2019.xlsx"), sheet = "A001293")
+aracal_51_daily$date <- as.Date(aracal_51_daily$date)
+aracal_51_daily <- subset(aracal_51_daily, date >= "2019-06-20")
+aracal_51_daily$Field <- "5-1"
+
+#combine
+aracal_daily <- rbind(aracal_43_daily, aracal_44_daily, aracal_51_daily, aracal_55_daily, aracal_65_daily)
+
+#subset columns 
+aracal_daily_sb <- aracal_daily[,c("date", "Tavg", "b1r","b2r","b3r","b4r","b5r","b6r","b7r","NDVI", "Field")]
+
+aracal_daily_sb$Field <- ordered(aracal_daily_sb$Field, levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+
+
+```
+
+
+
+#Sentinel2 data from GEE
+##read and preprocess of GEE data
+```{r}
+path_sen2gee <- "Z:/CC_UCD_atRR/data2/Sentinel-2/GEE"
+aramean_sen2 <- read.csv(file.path(path_sen2gee, "Sentinel2_NDVI_ArableMarks_060119_083119.csv"))
+#process
+names(aramean_sen2) <- c("date", "5-1", "4-3", "4-4", "5-5", "6-5")
+aramean_sen2$date <- as.Date(aramean_sen2$date, format = "%b %d, %Y")
+#change from wide to long 
+aramean_sen2 <- reshape2::melt(aramean_sen2, id.vars = c("date"), value.name = "NDVI")
+names(aramean_sen2)[2] <- "Field"
+str(aramean_sen2)
+
+#subset 
+#aramean_sen2 <- subset(aramean_sen2, date > "2019-06-20" & date <= "2019-08-08")
+
+#change the level order of Field 
+aramean_sen2$Field <- ordered(aramean_sen2$Field, levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+
+ggplot(aramean_sen2, aes(x = date, y = NDVI, color = Field)) + geom_line() 
+
+field5mean_sen2 <- read.csv(file.path(path_sen2gee, "Sentinel2_NDVI_Field5Buff_052319_083019.csv"))
+names(field5mean_sen2) <- c("date", "5-1", "4-3", "4-4", "5-5", "6-5")
+field5mean_sen2$date <- as.Date(field5mean_sen2$date, format = "%b %d, %Y")
+#change from wide to long 
+field5mean_sen2 <- reshape2::melt(field5mean_sen2, id.vars = c("date"), value.name = "NDVI")
+names(field5mean_sen2)[2] <- "Field"
+str(field5mean_sen2)
+#change the level order of Field 
+field5mean_sen2$Field <- ordered(field5mean_sen2$Field, levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+ggplot(field5mean_sen2, aes(x = date, y = NDVI, color = Field)) + geom_line() 
+
+```
+##read Sentinel-2 10m reflectance data from GEE
+```{r}
+path_sen2gee <- "Z:/CC_UCD_atRR/data2/Sentinel-2/GEE"
+
+#B2
+Cen5mean_sen2_B2 <- read.csv(file.path(path_sen2gee, "Sentinel2_B2_Cen5Buff_041019_100119.csv"))
+names(Cen5mean_sen2_B2) <- c("date", "4-4", "4-3", "5-1", "5-5", "6-5")
+Cen5mean_sen2_B2$`4-4` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B2$`4-4`)))
+Cen5mean_sen2_B2$`4-3` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B2$`4-3`)))
+Cen5mean_sen2_B2$`5-1` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B2$`5-1`)))
+Cen5mean_sen2_B2$`5-5` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B2$`5-5`)))
+Cen5mean_sen2_B2$`6-5` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B2$`6-5`)))
+Cen5mean_sen2_B2$date <- as.Date(Cen5mean_sen2_B2$date, format = "%b %d, %Y")
+Cen5mean_sen2_B2 <- reshape2::melt(Cen5mean_sen2_B2, id.vars = c("date"), value.name = "B2")
+names(Cen5mean_sen2_B2)[2] <- "Field"
+str(Cen5mean_sen2_B2)
+#B3
+Cen5mean_sen2_B3 <- read.csv(file.path(path_sen2gee, "Sentinel2_B3_Cen5Buff_041019_100119.csv"))
+names(Cen5mean_sen2_B3) <- c("date", "4-4", "4-3", "5-1", "5-5", "6-5")
+Cen5mean_sen2_B3$`4-4` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B3$`4-4`)))
+Cen5mean_sen2_B3$`4-3` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B3$`4-3`)))
+Cen5mean_sen2_B3$`5-1` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B3$`5-1`)))
+Cen5mean_sen2_B3$`5-5` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B3$`5-5`)))
+Cen5mean_sen2_B3$`6-5` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B3$`6-5`)))
+Cen5mean_sen2_B3$date <- as.Date(Cen5mean_sen2_B3$date, format = "%b %d, %Y")
+Cen5mean_sen2_B3 <- reshape2::melt(Cen5mean_sen2_B3, id.vars = c("date"), value.name = "B3")
+names(Cen5mean_sen2_B3)[2] <- "Field"
+str(Cen5mean_sen2_B3)
+#B4
+Cen5mean_sen2_B4 <- read.csv(file.path(path_sen2gee, "Sentinel2_B4_Cen5Buff_041019_100119.csv"))
+names(Cen5mean_sen2_B4) <- c("date", "4-4", "4-3", "5-1", "5-5", "6-5")
+Cen5mean_sen2_B4$`4-4` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B4$`4-4`)))
+Cen5mean_sen2_B4$`4-3` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B4$`4-3`)))
+Cen5mean_sen2_B4$`5-1` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B4$`5-1`)))
+Cen5mean_sen2_B4$`5-5` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B4$`5-5`)))
+Cen5mean_sen2_B4$`6-5` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B4$`6-5`)))
+Cen5mean_sen2_B4$date <- as.Date(Cen5mean_sen2_B4$date, format = "%b %d, %Y")
+Cen5mean_sen2_B4 <- reshape2::melt(Cen5mean_sen2_B4, id.vars = c("date"), value.name = "B4")
+names(Cen5mean_sen2_B4)[2] <- "Field"
+str(Cen5mean_sen2_B4)
+#B8
+Cen5mean_sen2_B8 <- read.csv(file.path(path_sen2gee, "Sentinel2_B8_Cen5Buff_041019_100119.csv"))
+names(Cen5mean_sen2_B8) <- c("date", "4-4", "4-3", "5-1", "5-5", "6-5")
+Cen5mean_sen2_B8$`4-4` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B8$`4-4`)))
+Cen5mean_sen2_B8$`4-3` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B8$`4-3`)))
+Cen5mean_sen2_B8$`5-1` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B8$`5-1`)))
+Cen5mean_sen2_B8$`5-5` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B8$`5-5`)))
+Cen5mean_sen2_B8$`6-5` <- as.numeric(gsub(",","",as.character(Cen5mean_sen2_B8$`6-5`)))
+Cen5mean_sen2_B8$date <- as.Date(Cen5mean_sen2_B8$date, format = "%b %d, %Y")
+Cen5mean_sen2_B8 <- reshape2::melt(Cen5mean_sen2_B8, id.vars = c("date"), value.name = "B8")
+names(Cen5mean_sen2_B8)[2] <- "Field"
+str(Cen5mean_sen2_B8)
+#NDVI
+Cen5mean_sen2_NDVI <- read.csv(file.path(path_sen2gee, "Sentinel2_NDVI_Cen5Buff_041019_100119.csv"))
+names(Cen5mean_sen2_NDVI) <- c("date", "4-4", "4-3", "5-1", "5-5", "6-5")
+Cen5mean_sen2_NDVI$date <- as.Date(Cen5mean_sen2_NDVI$date, format = "%b %d, %Y")
+Cen5mean_sen2_NDVI <- reshape2::melt(Cen5mean_sen2_NDVI, id.vars = c("date"), value.name = "NDVI")
+names(Cen5mean_sen2_NDVI)[2] <- "Field"
+str(Cen5mean_sen2_NDVI)
+
+#combine them together
+Cen5mean_sen2 <- cbind(Cen5mean_sen2_B2, Cen5mean_sen2_B3$B3, Cen5mean_sen2_B4$B4, Cen5mean_sen2_B8$B8, Cen5mean_sen2_NDVI$NDVI)
+names(Cen5mean_sen2) <- c("Date","Field","B2","B3","B4","B8","NDVI")
+Cen5mean_sen2$B2 <- Cen5mean_sen2$B2/10000
+Cen5mean_sen2$B3 <- Cen5mean_sen2$B3/10000
+Cen5mean_sen2$B4 <- Cen5mean_sen2$B4/10000
+Cen5mean_sen2$B8 <- Cen5mean_sen2$B8/10000
+Cen5mean_sen2$Field <- ordered(Cen5mean_sen2$Field, levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+
+head(Cen5mean_sen2)
+
+#plot
+write.csv(Cen5mean_sen2, file.path(path_output, "Cen5mean_sen2.csv"), row.names = FALSE)
+```
+
+#Across comparison
+##Plots
+```{r}
+#all together
+###original arable data
+ggplot(arable_daily_pl, aes(x  = date, y = NDVI, color = Field)) + geom_line(size = 0.75)  + ggtitle("NDVI from Arable Marks, UAV and Sentinel-2") + theme_light() + 
+  geom_point(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), shape = 19) + geom_line(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), linetype = "longdash") + 
+  ylim(0.5,0.9) + 
+  geom_point(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), shape = 17) + geom_line(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), linetype = "dotted")
+###calibrated arable data
+ggplot(aracal_daily_sb, aes(x  = date, y = NDVI, color = Field)) + geom_line(size = 0.75)  + ggtitle("NDVI from Arable Marks, UAV and Sentinel-2") + theme_light() + 
+  geom_point(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), shape = 19) + geom_line(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), linetype = "longdash") + 
+  ylim(0.5,0.9) + 
+  geom_point(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), shape = 17) + geom_line(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), linetype = "dotted")
+
+#arable and uav
+###ORIGINAL Arable data
+#ggplot(arable_daily_pl, aes(x  = date, y = NDVI, color = Field)) + geom_line(size = 0.75)  + ggtitle("NDVI from Arable Marks and UAV") + theme_light() + geom_point(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), shape = 19) + geom_line(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), linetype = "longdash")
+###calibrated arable data
+ggplot(aracal_daily_sb, aes(x  = date, y = NDVI, color = Field)) + geom_line(size = 0.75)  + ggtitle("NDVI from Arable Marks and UAV") + theme_light() + geom_point(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), shape = 19) + geom_line(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), linetype = "longdash") 
+
+#arable and sen2
+###ORIGINAL Arable data
+ggplot(arable_daily_pl, aes(x  = date, y = NDVI, color = Field)) + geom_line(size = 0.75)  + ggtitle("NDVI from Arable Marks and Sentinel-2") + theme_light() + geom_point(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), shape = 17) + geom_line(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), linetype = "dotted", size = 1) 
+###calibrated arable data
+ggplot(aracal_daily_sb, aes(x  = date, y = NDVI, color = Field)) + geom_line(size = 0.75)  + ggtitle("NDVI from Arable Marks and Sentinel-2") + theme_light() + geom_point(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), shape = 17) + geom_line(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), linetype = "dotted", size = 1) 
+
+
+#uav and sen2
+ggplot(aramean_uav, aes(x = date, y = ndvi, color = Field)) + geom_point() + geom_line() + theme_light() + ggtitle("NDVI from UAV and Sentinel-2") + geom_point(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), shape = 17) + geom_line(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), linetype = "dotted", size = 1) +  ylim(0.5,0.9)
+```
+
+##Quantification
+###UAV and Arable 
+```{r}
+#calculate RMSE
+aracal_uav <- merge(aracal_daily_sb, aramean_uav, by = c("date","Field"))
+RMSE(aracal_uav$NDVI, aracal_uav$ndvi, na.rm = TRUE)
+
+#remove NAs
+aracal_uav <- na.omit(aracal_uav)
+
+ggplot(aracal_uav, aes(x = NDVI, y = ndvi, color = Field)) + geom_point() 
+
+#for different fields
+p1 <- ggplot(subset(aracal_uav, Field == "4-3"), aes(x = NDVI, y  = ndvi))+geom_point()
+p2 <- ggplot(subset(aracal_uav, Field == "4-4"), aes(x = NDVI, y  = ndvi))+geom_point()
+p3 <- ggplot(subset(aracal_uav, Field == "5-1"), aes(x = NDVI, y  = ndvi))+geom_point()
+p4 <- ggplot(subset(aracal_uav, Field == "5-5"), aes(x = NDVI, y  = ndvi))+geom_point()
+p5 <- ggplot(subset(aracal_uav, Field == "6-5"), aes(x = NDVI, y  = ndvi))+geom_point()
+grid.arrange(p1, p2,p3,p4,p5, nrow = 3)
+
+#4-3
+RMSE(subset(aracal_uav, Field == "4-3")$NDVI, subset(aracal_uav, Field == "4-3")$ndvi)
+cor(subset(aracal_uav, Field == "4-3")$NDVI, subset(aracal_uav, Field == "4-3")$ndvi)^2
+#4-4
+RMSE(subset(aracal_uav, Field == "4-4")$NDVI, subset(aracal_uav, Field == "4-4")$ndvi)
+cor(subset(aracal_uav, Field == "4-4")$NDVI, subset(aracal_uav, Field == "4-4")$ndvi)^2
+#5-1
+RMSE(subset(aracal_uav, Field == "5-1")$NDVI, subset(aracal_uav, Field == "5-1")$ndvi)
+cor(subset(aracal_uav, Field == "5-1")$NDVI, subset(aracal_uav, Field == "5-1")$ndvi)^2
+#5-5
+RMSE(subset(aracal_uav, Field == "5-5")$NDVI, subset(aracal_uav, Field == "5-5")$ndvi)
+cor(subset(aracal_uav, Field == "5-5")$NDVI, subset(aracal_uav, Field == "5-5")$ndvi)^2
+#6-5
+RMSE(subset(aracal_uav, Field == "6-5")$NDVI, subset(aracal_uav, Field == "6-5")$ndvi)
+cor(subset(aracal_uav, Field == "6-5")$NDVI, subset(aracal_uav, Field == "6-5")$ndvi)^2
+#overall 
+RMSE(aracal_uav$NDVI, aracal_uav$ndvi)
+cor(aracal_uav$NDVI, aracal_uav$ndvi)^2
+#overall without 4-4
+RMSE(subset(aracal_uav, Field != "4-4")$NDVI, subset(aracal_uav, Field != "4-4")$ndvi)
+cor(subset(aracal_uav, Field != "4-4")$NDVI, subset(aracal_uav, Field != "4-4")$ndvi)^2
+
+```
+
+#Smoothing of daily time series  
+##Interpolation of missing values 
+```{r}
+plot(aracal_51_daily$NDVI)
+lines(sgolayfilt(aracal_51_daily$NDVI, p = 1, n= 3), col = "red")
+
+
+sgolayfilt(aracal_43_daily$NDVI)
+plot(aracal_43_daily$NDVI)
+
+
+##Interpolation of missing values for NDVI
+sum(is.na(aracal_43_daily$NDVI))
+par(mfrow = c(2,2))
+plot(aracal_43_daily$NDVI, ylab = "NDVI", main = "Linear Interpolation")
+lines(na_interpolation(aracal_43_daily$NDVI, option = "linear"))
+plot(aracal_43_daily$NDVI, ylab = "NDVI", main = "Stineman Interpolation")
+lines(na_interpolation(aracal_43_daily$NDVI, option = "stine"))
+plot(aracal_43_daily$NDVI, ylab = "NDVI", main = "Spline Interpolation")
+lines(na_interpolation(aracal_43_daily$NDVI, option = "spline"))
+
+plot(aracal_43_daily$NDVI, ylab = "NDVI", main = "Kalman Filter Auto Arima")
+lines(na_kalman(aracal_43_daily$NDVI, model = "auto.arima"))
+plot(aracal_43_daily$NDVI, ylab = "NDVI", main = "Kalman Filter StructTS")
+lines(na_kalman(aracal_43_daily$NDVI))
+
+#use stineman interpolation 
+aracal_43_daily$NDVI
+a <- na_interpolation(aracal_43_daily$NDVI, option = "stine")
+
+par(mfrow = c(1,1))
+plot(a)
+lines(sgolayfilt(a, p =1, n  =3), col = "red")
+lines(sgolayfilt(a, p =3), col = "blue")
+
+
+
+```
+##Generate interpolated and smoothed NDVI time series of Arable 
+###4-3
+```{r}
+##4-3
+names(aracal_43_daily)
+###NDVI
+plot(aracal_43_daily$NDVI)
+aracal_43_daily$NDVI_ft <- sgolayfilt(na_interpolation(aracal_43_daily$NDVI, option = "stine"), p=1, n=3)
+plot(aracal_43_daily$NDVI_ft)
+###b1r
+plot(aracal_43_daily$b1r)
+sum(is.na(aracal_43_daily$b1r))
+aracal_43_daily$b1r_ft <- sgolayfilt(na_interpolation(aracal_43_daily$b1r, option = "stine"), p=1, n=3)
+points(aracal_43_daily$b1r_ft, col = "red")
+###b2r
+plot(aracal_43_daily$b2r)
+sum(is.na(aracal_43_daily$b2r))
+aracal_43_daily$b2r_ft <- sgolayfilt(na_interpolation(aracal_43_daily$b2r, option = "stine"), p=1, n=3)
+points(aracal_43_daily$b2r_ft, col = "red")
+###b3r
+plot(aracal_43_daily$b3r)
+sum(is.na(aracal_43_daily$b3r))
+aracal_43_daily$b3r_ft <- sgolayfilt(na_interpolation(aracal_43_daily$b3r, option = "stine"), p=1, n=3)
+points(aracal_43_daily$b3r_ft, col = "red")
+###b4r
+plot(aracal_43_daily$b4r)
+sum(is.na(aracal_43_daily$b4r))
+aracal_43_daily$b4r_ft <- sgolayfilt(na_interpolation(aracal_43_daily$b4r, option = "stine"), p=1, n=3)
+points(aracal_43_daily$b4r_ft, col = "red")
+###b5r
+plot(aracal_43_daily$b5r)
+sum(is.na(aracal_43_daily$b5r))
+aracal_43_daily$b5r_ft <- sgolayfilt(na_interpolation(aracal_43_daily$b5r, option = "stine"), p=1, n=3)
+points(aracal_43_daily$b5r_ft, col = "red")
+###b6r
+plot(aracal_43_daily$b6r)
+sum(is.na(aracal_43_daily$b6r))
+aracal_43_daily$b6r_ft <- sgolayfilt(na_interpolation(aracal_43_daily$b6r, option = "stine"), p=1, n=3)
+points(aracal_43_daily$b6r_ft, col = "red")
+###b7r
+plot(aracal_43_daily$b7r)
+sum(is.na(aracal_43_daily$b7r))
+aracal_43_daily$b7r_ft <- sgolayfilt(na_interpolation(aracal_43_daily$b7r, option = "stine"), p=1, n=3)
+points(aracal_43_daily$b7r_ft, col = "red")
+
+```
+###4-4
+```{r}
+#4-4
+plot(aracal_44_daily$NDVI)
+aracal_44_daily$NDVI
+aracal_44_daily
+plot(aracal_44_daily$b4r)
+plot(aracal_44_daily$b2r)
+###which band has problem
+par(mfrow = c(2,3))
+plot(x=aracal_44_daily$date,y=aracal_44_daily$b1r, xlab = "Date", ylab  = "Reflectance", main = "Band 1")
+plot(x=aracal_44_daily$date,y=aracal_44_daily$b2r, xlab = "Date", ylab  = "Reflectance", main = "Band 2")
+plot(x=aracal_44_daily$date,y=aracal_44_daily$b3r, xlab = "Date", ylab  = "Reflectance", main = "Band 3")
+plot(x=aracal_44_daily$date,y=aracal_44_daily$b4r, xlab = "Date", ylab  = "Reflectance", main = "Band 4")
+plot(x=aracal_44_daily$date,y=aracal_44_daily$b5r, xlab = "Date", ylab  = "Reflectance", main = "Band 5")
+plot(x=aracal_44_daily$date,y=aracal_44_daily$b6r, xlab = "Date", ylab  = "Reflectance", main = "Band 6")
+###correction
+####NDVI
+aracal_44_daily$NDVI_ft <- aracal_44_daily$NDVI
+aracal_44_daily$NDVI_ft[1:32] <- aracal_44_daily$NDVI_ft[1:32] + 0.1314
+aracal_44_daily$NDVI_ft[33] <-  aracal_44_daily$NDVI_ft[33] + 0.0468
+plot(aracal_44_daily$NDVI_ft)
+plot(aracal_44_daily$NDVI)
+####b1r
+aracal_44_daily$b1r_ft <- aracal_44_daily$b1r
+aracal_44_daily$b1r_ft[1:32] <- aracal_44_daily$b1r_ft[1:32] + 0.1314
+aracal_44_daily$b1r_ft[33] <-  aracal_44_daily$b1r_ft[33] + 0.0468
+plot(aracal_44_daily$b1r_ft)
+plot(aracal_44_daily$b1r)
+
+```
+
+```{r}
+
+
+#5-1
+plot(aracal_51_daily$NDVI)
+sum(is.na(aracal_51_daily$NDVI))
+aracal_51_daily$NDVI_ft <- sgolayfilt(aracal_51_daily$NDVI, p =1, n=3)
+plot(aracal_51_daily$NDVI_ft)
+#5-5
+plot(aracal_55_daily$NDVI)
+sum(is.na(aracal_55_daily$NDVI))
+aracal_55_daily$NDVI_ft <- sgolayfilt(aracal_55_daily$NDVI, p =1, n=3)
+plot(aracal_55_daily$NDVI_ft)
+#6-5
+plot(aracal_65_daily$NDVI)
+sum(is.na(aracal_65_daily$NDVI))
+aracal_65_daily$NDVI_ft <- sgolayfilt(aracal_65_daily$NDVI, p =1, n=3)
+plot(aracal_65_daily$NDVI_ft)
+
+#combine 
+#combine
+
+aracal_daily <- rbind(aracal_43_daily, aracal_44_daily, aracal_51_daily, aracal_55_daily, aracal_65_daily)
+
+#subset columns 
+aracal_daily_sb <- aracal_daily[,c("date", "Tavg", "b1r","b2r","b3r","b4r","b5r","b6r","b7r","NDVI","NDVI_ft" ,"Field")]
+
+aracal_daily_sb$Field <- ordered(aracal_daily_sb$Field, levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+
+```
+
+#Across comparison between smoothed Arable data and UAV, and Sentinel-2 NDVI
+##Arable and UAV 
+###Plot
+```{r}
+###Smoothed arable data
+ggplot(aracal_daily_sb, aes(x  = date, y = NDVI_ft, color = Field)) + geom_line(size = 0.75)  + ggtitle("NDVI from Arable Marks, UAV and Sentinel-2") + theme_light() + 
+  geom_point(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), shape = 19) + geom_line(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), linetype = "longdash") + 
+  ylim(0.5,0.9) + 
+  geom_point(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), shape = 17) + geom_line(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), linetype = "dotted")
+
+###smoothed arable data with UAV
+ggplot(aracal_daily_sb, aes(x  = date, y = NDVI_ft, color = Field)) + geom_line(size = 0.75)  + ggtitle("Smoothed NDVI from Arable Marks and UAV") + theme_light() + geom_point(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), shape = 19) + geom_line(data = aramean_uav, aes(x = date, y = ndvi, color =  Field), linetype = "longdash") 
+
+
+
+####scatter plots
+
+###uav and sentinel-2
+ggplot(aramean_uav, aes(x = date, y = ndvi, color = Field)) + geom_point() + geom_line() + theme_light() + ggtitle("NDVI from UAV and Sentinel-2") + geom_point(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), shape = 17) + geom_line(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), linetype = "dotted", size = 1)
+
+
+```
+###Quantification
+```{r}
+#quantification
+aracal_uav <- merge(aracal_daily_sb, aramean_uav, by = c("date","Field"))
+RMSE(aracal_uav$NDVI_ft, aracal_uav$ndvi)
+
+ggplot(aracal_uav, aes(x = NDVI_ft, y = ndvi)) + geom_point(aes(color = Field)) + xlab("Smoothed NDVI from Arable") + ylab("NDVI from UAV") + stat_smooth(method = "lm", se = FALSE) + xlim(0.5,0.9)+ylim(0.5,0.9) + geom_abline(slope = 1, intercept = 0)
+
+#for different fields
+p1 <- ggplot(subset(aracal_uav, Field == "4-3"), aes(x = NDVI, y  = ndvi))+geom_point()
+p2 <- ggplot(subset(aracal_uav, Field == "4-4"), aes(x = NDVI, y  = ndvi))+geom_point()
+p3 <- ggplot(subset(aracal_uav, Field == "5-1"), aes(x = NDVI, y  = ndvi))+geom_point()
+p4 <- ggplot(subset(aracal_uav, Field == "5-5"), aes(x = NDVI, y  = ndvi))+geom_point()
+p5 <- ggplot(subset(aracal_uav, Field == "6-5"), aes(x = NDVI, y  = ndvi))+geom_point()
+grid.arrange(p1, p2,p3,p4,p5, nrow = 3)
+
+#4-3
+RMSE(subset(aracal_uav, Field == "4-3")$NDVI_ft, subset(aracal_uav, Field == "4-3")$ndvi)
+cor(subset(aracal_uav, Field == "4-3")$NDVI_ft, subset(aracal_uav, Field == "4-3")$ndvi)^2
+#4-4
+RMSE(subset(aracal_uav, Field == "4-4")$NDVI_ft, subset(aracal_uav, Field == "4-4")$ndvi)
+cor(subset(aracal_uav, Field == "4-4")$NDVI_ft, subset(aracal_uav, Field == "4-4")$ndvi)^2
+#5-1
+RMSE(subset(aracal_uav, Field == "5-1")$NDVI_ft, subset(aracal_uav, Field == "5-1")$ndvi)
+cor(subset(aracal_uav, Field == "5-1")$NDVI_ft, subset(aracal_uav, Field == "5-1")$ndvi)^2
+#5-5
+RMSE(subset(aracal_uav, Field == "5-5")$NDVI_ft, subset(aracal_uav, Field == "5-5")$ndvi)
+cor(subset(aracal_uav, Field == "5-5")$NDVI_ft, subset(aracal_uav, Field == "5-5")$ndvi)^2
+#6-5
+RMSE(subset(aracal_uav, Field == "6-5")$NDVI_ft, subset(aracal_uav, Field == "6-5")$ndvi)
+cor(subset(aracal_uav, Field == "6-5")$NDVI_ft, subset(aracal_uav, Field == "6-5")$ndvi)^2
+#overall 
+RMSE(aracal_uav$NDVI_ft, aracal_uav$ndvi)
+cor(aracal_uav$NDVI_ft, aracal_uav$ndvi)^2
+#overall without 4-4
+RMSE(subset(aracal_uav, Field != "4-4")$NDVI_ft, subset(aracal_uav, Field != "4-4")$ndvi)
+cor(subset(aracal_uav, Field != "4-4")$NDVI_ft, subset(aracal_uav, Field != "4-4")$ndvi)^2
+
+
+#function between NDVI
+lm(subset(aracal_uav, Field != "4-4")$NDVI_ft~ subset(aracal_uav, Field != "4-4")$ndvi)
+
+```
+
+##sentinel-2 and Arable comparison
+###Plot
+```{r}
+###smoothed arable data with Sentinel-2
+ggplot(aracal_daily_sb, aes(x  = date, y = NDVI_ft, color = Field)) + geom_line(size = 0.75)  + ggtitle("Smoothed NDVI from Arable Marks and Sentinel-2 of Arable FOV") + theme_light() + geom_point(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), shape = 17) + geom_line(data = aramean_sen2, aes(x = date, y = NDVI, color = Field), linetype = "dotted", size = 1) 
+ggplot(aracal_daily_sb, aes(x  = date, y = NDVI_ft, color = Field)) + geom_line(size = 0.75)  + ggtitle("Smoothed NDVI from Arable Marks and Sentinel-2 of Field Average") + theme_light() + geom_point(data = subset(field5mean_sen2, date > "2019-05-30"), aes(x = date, y = NDVI, color = Field), shape = 17) + geom_line(data = subset(field5mean_sen2, date > "2019-05-30"), aes(x = date, y = NDVI, color = Field), linetype = "dotted", size = 1) 
+
+```
+###Quantification 
+```{r}
+aracal_sen2 <- merge(aracal_daily_sb, aramean_sen2, by = c("date", "Field"))
+aracal_sen2
+RMSE(aracal_sen2$NDVI_ft, aracal_sen2$NDVI.y)
+
+#4-3
+RMSE(subset(aracal_sen2, Field == "4-3")$NDVI_ft, subset(aracal_sen2, Field == "4-3")$NDVI.y)
+cor(subset(aracal_sen2, Field == "4-3")$NDVI_ft, subset(aracal_sen2, Field == "4-3")$NDVI.y)^2
+#4-4
+RMSE(subset(aracal_sen2, Field == "4-4")$NDVI_ft, subset(aracal_sen2, Field == "4-4")$NDVI.y)
+cor(subset(aracal_sen2, Field == "4-4")$NDVI_ft, subset(aracal_sen2, Field == "4-4")$NDVI.y)^2
+#5-1
+RMSE(subset(aracal_sen2, Field == "5-1")$NDVI_ft, subset(aracal_sen2, Field == "5-1")$NDVI.y)
+cor(subset(aracal_sen2, Field == "5-1")$NDVI_ft, subset(aracal_sen2, Field == "5-1")$NDVI.y)^2
+#5-5
+RMSE(subset(aracal_sen2, Field == "5-5")$NDVI_ft, subset(aracal_sen2, Field == "5-5")$NDVI.y)
+cor(subset(aracal_sen2, Field == "5-5")$NDVI_ft, subset(aracal_sen2, Field == "5-5")$NDVI.y)^2
+#6-5
+RMSE(subset(aracal_sen2, Field == "6-5")$NDVI_ft, subset(aracal_sen2, Field == "6-5")$NDVI.y)
+cor(subset(aracal_sen2, Field == "6-5")$NDVI_ft, subset(aracal_sen2, Field == "6-5")$NDVI.y)^2
+#overall 
+RMSE(aracal_sen2$NDVI_ft, aracal_sen2$NDVI.y)
+cor(aracal_sen2$NDVI_ft, aracal_sen2$NDVI.y)^2
+#overall without 4-4
+RMSE(subset(aracal_sen2, Field != "4-4")$NDVI_ft, subset(aracal_sen2, Field != "4-4")$NDVI.y)
+cor(subset(aracal_sen2, Field != "4-4")$NDVI_ft, subset(aracal_sen2, Field != "4-4")$NDVI.y)^2
+
+
+#function between NDVI
+lm(subset(aracal_sen2, Field != "4-4")$NDVI_ft~ subset(aracal_sen2, Field != "4-4")$NDVI.y)
+
+
+
+aracal_sen2_2 <- merge(aracal_daily_sb, field5mean_sen2, by = c("date", "Field"))
+aracal_sen2_2
+RMSE(aracal_sen2_2$NDVI_ft, aracal_sen2_2$NDVI.y)
+
+#4-3
+RMSE(subset(aracal_sen2_2, Field == "4-3")$NDVI_ft, subset(aracal_sen2_2, Field == "4-3")$NDVI.y)
+cor(subset(aracal_sen2_2, Field == "4-3")$NDVI_ft, subset(aracal_sen2_2, Field == "4-3")$NDVI.y)^2
+#4-4
+RMSE(subset(aracal_sen2_2, Field == "4-4")$NDVI_ft, subset(aracal_sen2_2, Field == "4-4")$NDVI.y)
+cor(subset(aracal_sen2_2, Field == "4-4")$NDVI_ft, subset(aracal_sen2_2, Field == "4-4")$NDVI.y)^2
+#5-1
+RMSE(subset(aracal_sen2_2, Field == "5-1")$NDVI_ft, subset(aracal_sen2_2, Field == "5-1")$NDVI.y)
+cor(subset(aracal_sen2_2, Field == "5-1")$NDVI_ft, subset(aracal_sen2_2, Field == "5-1")$NDVI.y)^2
+#5-5
+RMSE(subset(aracal_sen2_2, Field == "5-5")$NDVI_ft, subset(aracal_sen2_2, Field == "5-5")$NDVI.y)
+cor(subset(aracal_sen2_2, Field == "5-5")$NDVI_ft, subset(aracal_sen2_2, Field == "5-5")$NDVI.y)^2
+#6-5
+RMSE(subset(aracal_sen2_2, Field == "6-5")$NDVI_ft, subset(aracal_sen2_2, Field == "6-5")$NDVI.y)
+cor(subset(aracal_sen2_2, Field == "6-5")$NDVI_ft, subset(aracal_sen2_2, Field == "6-5")$NDVI.y)^2
+#overall 
+RMSE(aracal_sen2_2$NDVI_ft, aracal_sen2_2$NDVI.y)
+cor(aracal_sen2_2$NDVI_ft, aracal_sen2_2$NDVI.y)^2
+#overall without 4-4
+RMSE(subset(aracal_sen2_2, Field != "4-4")$NDVI_ft, subset(aracal_sen2_2, Field != "4-4")$NDVI.y)
+cor(subset(aracal_sen2_2, Field != "4-4")$NDVI_ft, subset(aracal_sen2_2, Field != "4-4")$NDVI.y)^2
+
+
+#function between NDVI
+lm(subset(aracal_sen2_2, Field != "4-4")$NDVI_ft~ subset(aracal_sen2_2, Field != "4-4")$NDVI.y)
+
+```
+
+##extract plot average reflectance from the UAV
+###function
+```{r}
+ref_extract <- function(uav, shp, FUN){
+  ext_uav <- raster::extract(uav, shp, fun = FUN, na.rm = TRUE, df= TRUE, buffer = 0)
+  ext_uav$Field <- shp$FieldID
+  return(ext_uav)
+}
+```
+###Extract average reflectance of each fields
+####use the inner 10m buff from the boundary
+```{r}
+field5mean_uav_20190523 <- ref_extract(uav_20190523, FieldBounds5_buff, mean)
+field5mean_uav_20190523$date <- as.Date("2019-05-23")
+field5mean_uav_20190530 <- ref_extract(uav_20190530, FieldBounds5_buff, mean)
+field5mean_uav_20190530$date <- as.Date("2019-05-30")
+
+field5mean_uav_20190614 <- ref_extract(uav_20190614, FieldBounds5_buff, mean)
+field5mean_uav_20190614$date <- as.Date("2019-06-14")
+
+field5mean_uav_20190620 <- ref_extract(uav_20190620, FieldBounds5_buff, mean)
+field5mean_uav_20190620$date <- as.Date("2019-06-20")
+field5mean_uav_20190626 <- ref_extract(uav_20190626, FieldBounds5_buff, mean)
+field5mean_uav_20190626$date <- as.Date("2019-06-26")
+field5mean_uav_20190703 <- ref_extract(uav_20190703, FieldBounds5_buff, mean)
+field5mean_uav_20190703$date <- as.Date("2019-07-03")
+field5mean_uav_20190718 <- ref_extract(uav_20190718, FieldBounds5_buff, mean)
+field5mean_uav_20190718$date <- as.Date("2019-07-18")
+#field5mean_uav_20190725 <- ref_extract(uav_20190725, FieldBounds5_buff, mean)
+#field5mean_uav_20190725$date <- as.Date("2019-07-25")
+field5mean_uav_20190801 <- ref_extract(uav_20190801, FieldBounds5_buff, mean)
+field5mean_uav_20190801$date <- as.Date("2019-08-01")
+field5mean_uav_20190808 <- ref_extract(uav_20190808, FieldBounds5_buff, mean)
+field5mean_uav_20190808$date <- as.Date("2019-08-08")
+field5mean_uav_20190814 <- ref_extract(uav_20190814, FieldBounds5_buff, mean)
+field5mean_uav_20190814$date <- as.Date("2019-08-14")
+field5mean_uav_20190822 <- ref_extract(uav_20190822, FieldBounds5_buff, mean)
+field5mean_uav_20190822$date <- as.Date("2019-08-22")
+
+field5mean_uav <- rbind(field5mean_uav_20190523, field5mean_uav_20190530,field5mean_uav_20190614,field5mean_uav_20190620, field5mean_uav_20190626, field5mean_uav_20190703, field5mean_uav_20190718,  field5mean_uav_20190801, field5mean_uav_20190808, field5mean_uav_20190814, field5mean_uav_20190822)
+
+path_output <- "Z:/CC_UCD_atRR/data2/UAV/Outputs"
+write.csv(field5mean_uav, file.path(path_output, "field5mean_uav.csv"), row.names = FALSE)
+
+
+field5mean_uav <- read.csv(file.path(path_output, "field5mean_uav.csv"))
+field5mean_uav$ID <- FieldBounds5_buff$FieldID
+names(field5mean_uav)[1] <- "Field"
+field5mean_uav$date <- as.Date(field5mean_uav$date)
+field5mean_uav$Field <- as.factor(field5mean_uav$Field)
+field5mean_uav$Field <- ordered(field5mean_uav$Field, levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+
+```
+####use the out 15m buffer from the center 
+```{r}
+#Cen5_buff <- shapefile(file.path(path_shp, "RR_center_15mbuffer_5tomato_2019.shp"))
+
+cen5mean_uav_20190523 <- ref_extract(uav_20190523, Cen5_buff, mean)
+cen5mean_uav_20190523$date <- as.Date("2019-05-23")
+cen5mean_uav_20190530 <- ref_extract(uav_20190530, Cen5_buff, mean)
+cen5mean_uav_20190530$date <- as.Date("2019-05-30")
+
+cen5mean_uav_20190614 <- ref_extract(uav_20190614, Cen5_buff, mean)
+cen5mean_uav_20190614$date <- as.Date("2019-06-14")
+
+cen5mean_uav_20190620 <- ref_extract(uav_20190620, Cen5_buff, mean)
+cen5mean_uav_20190620$date <- as.Date("2019-06-20")
+cen5mean_uav_20190626 <- ref_extract(uav_20190626, Cen5_buff, mean)
+cen5mean_uav_20190626$date <- as.Date("2019-06-26")
+cen5mean_uav_20190703 <- ref_extract(uav_20190703, Cen5_buff, mean)
+cen5mean_uav_20190703$date <- as.Date("2019-07-03")
+cen5mean_uav_20190718 <- ref_extract(uav_20190718, Cen5_buff, mean)
+cen5mean_uav_20190718$date <- as.Date("2019-07-18")
+#cen5mean_uav_20190725 <- ref_extract(uav_20190725, Cen5_buff, mean)
+#cen5mean_uav_20190725$date <- as.Date("2019-07-25")
+cen5mean_uav_20190801 <- ref_extract(uav_20190801, Cen5_buff, mean)
+cen5mean_uav_20190801$date <- as.Date("2019-08-01")
+cen5mean_uav_20190808 <- ref_extract(uav_20190808, Cen5_buff, mean)
+cen5mean_uav_20190808$date <- as.Date("2019-08-08")
+cen5mean_uav_20190814 <- ref_extract(uav_20190814, Cen5_buff, mean)
+cen5mean_uav_20190814$date <- as.Date("2019-08-14")
+cen5mean_uav_20190822 <- ref_extract(uav_20190822, Cen5_buff, mean)
+cen5mean_uav_20190822$date <- as.Date("2019-08-22")
+
+cen5mean_uav <- rbind(cen5mean_uav_20190523, cen5mean_uav_20190530,cen5mean_uav_20190614,cen5mean_uav_20190620, cen5mean_uav_20190626, cen5mean_uav_20190703, cen5mean_uav_20190718,  cen5mean_uav_20190801, cen5mean_uav_20190808, cen5mean_uav_20190814, cen5mean_uav_20190822)
+
+cen5mean_uav[41:50,]$date <- as.Date("2019-08-08")
+
+path_output <- "Z:/CC_UCD_atRR/data2/UAV/Outputs"
+write.csv(cen5mean_uav, file.path(path_output, "cen5mean_uav.csv"), row.names = FALSE)
+
+
+cen5mean_uav <- read.csv(file.path(path_output, "cen5mean_uav.csv"))
+cen5mean_uav$ID <- Cen5_buff$FieldID
+names(cen5mean_uav)[1] <- "Field"
+cen5mean_uav$date <- as.Date(cen5mean_uav$date)
+cen5mean_uav$Field <- as.factor(cen5mean_uav$Field)
+cen5mean_uav$Field <- ordered(cen5mean_uav$Field, levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+
+```
+
+###Intercomparison of UAV and Sentinel-2
+```{r}
+
+```
+
+#-------------------------------------------
+#Canopy cover 
+##Ground truth from supervised classification
+```{r}
+cc_class <- function(veg, shp){
+  num_veg <- raster::extract(veg, shp, fun = function(x,...){sum(x[]==0)}, df= TRUE)
+  num_tot <- raster::extract(veg, shp, fun = function(x,...){length(x)}, df = TRUE)
+  cc <- data.frame(cc = num_veg[,2]/num_tot[,2], Field = shp$FieldID)
+  return(cc)
+}
+
+cc_class3 <- function(veg, shp){
+  num_nonsoil <- raster::extract(veg, shp, fun = function(x,...){sum(x[]!=2)}, df= TRUE)
+  num_tot <- raster::extract(veg, shp, fun = function(x,...){length(x)}, df = TRUE)
+  cc <- data.frame(cc = num_nonsoil[,2]/num_tot[,2], Field = shp$FieldID)
+  return(cc)
+}
+
+cc_class4 <- function(veg, shp){
+  num_nonsoil <- raster::extract(veg, shp, fun = function(x,...){sum(x[]!=1)}, df= TRUE)
+  num_tot <- raster::extract(veg, shp, fun = function(x,...){length(x)}, df = TRUE)
+  cc <- data.frame(cc = num_nonsoil[,2]/num_tot[,2], Field = shp$FieldID)
+  return(cc)
+}
+
+read_class <- function(classification, shp){
+  uni_class <- unique(values(classification))
+  uni_class <- 0:(length(uni_class)-1)
+  df_num <- as.data.frame(matrix(0, nrow = length(Cen5_buff), ncol = length(uni_class)))
+  for(i in 1:length(uni_class)){
+    df_num[,i] <- raster::extract(classification, shp, fun = function(x,...){sum(x==uni_class[i])}, df = TRUE)[,2]
+  }
+  df_num$Field <- shp$FieldID
+  return(df_num)
+}
+
+
+```
+###extract for Cen5_buff
+```{r}
+path_class <- "Z:/CC_UCD_atRR/data2/UAV/uav_img_classification"
+class_20190523 <- raster(file.path(path_class, "Classification_20190523.tif"))
+#ccclass5_20190523 <- cc_class(class_20190523, Cen5_buff)
+class_20190530 <- raster(file.path(path_class, "Classification_20190530.tif"))
+#ccclass5_20190530 <- cc_class(class_20190530, Cen5_buff)
+class_20190606 <- raster(file.path(path_class, "Classification_20190606.tif"))
+#ccclass5_20190606 <- cc_class(class_20190606, Cen5_buff)
+class_20190614 <- raster(file.path(path_class, "Classification_20190614.tif"))
+#ccclass5_20190614 <- cc_class(class_20190614, Cen5_buff)
+class_20190620 <- raster(file.path(path_class, "Classification_20190620.tif"))
+#ccclass5_20190620 <- cc_class(class_20190620, Cen5_buff)
+class_20190626 <- raster(file.path(path_class, "Classification_20190626.tif"))
+#ccclass5_20190626 <- cc_class(class_20190626, Cen5_buff)
+class_20190718 <- raster(file.path(path_class, "Classification_20190718.tif"))
+#ccclass5_20190718 <- cc_class3(class_20190718, Cen5_buff)
+class_20190725 <- raster(file.path(path_class, "Classification_20190725.tif"))
+#ccclass5_20190725 <- cc_class3(class_20190725, Cen5_buff)
+class_20190703 <- raster(file.path(path_class, "Classification_20190703.tif"))
+#ccclass5_20190703 <- cc_class3(class_20190703, Cen5_buff)
+class_20190801 <- raster(file.path(path_class, "Classification_20190801_4class.tif"))
+#ccclass5_20190801 <- cc_class(class_20190801, Cen5_buff)
+class_20190808 <- raster(file.path(path_class, "Classification_20190808.tif"))
+#ccclass5_20190808 <- cc_class(class_20190808, Cen5_buff)
+class_20190814 <- raster(file.path(path_class, "Classification_20190814_3class.tif"))
+#ccclass5_20190814 <- cc_class(class_20190814, Cen5_buff)
+class_20190822 <- raster(file.path(path_class, "Classification_20190822.tif"))
+#ccclass5_20190822 <- cc_class3(class_20190822, Cen5_buff)
+
+classsum_20190523 <- read_class(class_20190523, Cen5_buff)
+names(classsum_20190523)[1:2] <- c("soil","veg")
+classsum_20190530 <- read_class(class_20190530, Cen5_buff)
+names(classsum_20190530)[1:2] <- c("veg","soil")
+classsum_20190606 <- read_class(class_20190606, Cen5_buff)
+names(classsum_20190606)[1:2] <- c("soil","veg")
+classsum_20190626 <- read_class(class_20190626, Cen5_buff)
+names(classsum_20190626)[1:2] <- c("veg","soil")
+classsum_20190614 <- read_class(class_20190614, Cen5_buff)
+names(classsum_20190614)[1:2] <- c("veg","soil")
+classsum_20190620 <- read_class(class_20190620, Cen5_buff)
+names(classsum_20190620)[1:2] <- c("veg","soil")
+classsum_20190703 <- read_class(class_20190703, Cen5_buff)
+names(classsum_20190703)[1:3] <- c("veg","flower","soil")
+classsum_20190718 <- read_class(class_20190718, Cen5_buff)
+names(classsum_20190718)[1:3] <- c("veg","flower","soil")
+classsum_20190725 <- read_class(class_20190725, Cen5_buff)
+names(classsum_20190725)[1:3] <- c("veg","flower","soil")
+classsum_20190801 <- read_class(class_20190801, Cen5_buff)
+names(classsum_20190801)[1:4] <- c("veg","flower","soil","fruit")
+classsum_20190808 <- read_class(class_20190808, Cen5_buff)
+names(classsum_20190808)[1:4] <- c("veg","soil","flower","fruit")
+classsum_20190814 <- read_class(class_20190814, Cen5_buff)
+names(classsum_20190814)[1:3] <- c("veg","soil","fruit")
+classsum_20190822 <- read_class(class_20190822, Cen5_buff)
+names(classsum_20190822)[1:3] <- c("veg","soil","fruit")
+
+
+sapply(ls_classsum, function(x){x$total = apply(x[,sapply(x, is.numeric)])})
+
+
+
+
+
+#add dates 
+ccclass5_20190523$date <- as.Date("2019-05-23")
+ccclass5_20190530$date <- as.Date("2019-05-30")
+ccclass5_20190614$date <- as.Date("2019-06-14")
+ccclass5_20190620$date <- as.Date("2019-06-20")
+ccclass5_20190626$date <- as.Date("2019-06-26")
+ccclass5_20190703$date <- as.Date("2019-07-03")
+ccclass5_20190718$date <- as.Date("2019-07-18")
+#ccfield_20190725$date <- as.Date("2019-07-25")
+ccclass5_20190801$date <- as.Date("2019-08-01")
+ccclass5_20190808$date <- as.Date("2019-08-14")
+ccclass5_20190814$date <- as.Date("2019-08-14")
+ccclass5_20190822$date <- as.Date("2019-08-22")
+
+ccclass5_uav <- rbind(ccclass5_20190523, ccclass5_20190530,ccclass5_20190614,ccclass5_20190620, ccclass5_20190626, ccclass5_20190703, ccclass5_20190718,  ccclass5_20190801, ccclass5_20190808, ccclass5_20190814, ccclass5_20190822)
+
+```
+###plot the canopy cover change
+```{r}
+ggplot(ccclass5_uav, aes(x = date, y = cc, color = Field)) + geom_point() + geom_line() + ylab("Canopy Cover") + ggtitle("Canopy Cover Change") + xlab("Date") + scale_x_date(date_labels = "%m/%d", date_breaks = "2 weeks")
+
+```
+
+##NDVI-threshold based binary classification 
+###Find vegetation where NDVI>0.5
+```{r}
+ndvi_threshold <- 0.5
+veg_20190523 <- calc(uav_20190523$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190530 <- calc(uav_20190530$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190606 <- calc(uav_20190606$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190614 <- calc(uav_20190614$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190620 <- calc(uav_20190620$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190626 <- calc(uav_20190626$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190703 <- calc(uav_20190703$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190718 <- calc(uav_20190718$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+#veg_20190725 <- calc(uav_20190725$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190801 <- calc(uav_20190801$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190808 <- calc(uav_20190808$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190814 <- calc(uav_20190814$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+veg_20190822 <- calc(uav_20190822$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
+
+#output
+writeRaster(veg_20190523, file.path(path_output, "veg_20190523_ndvi0.5.tif"))
+writeRaster(veg_20190530, file.path(path_output, "veg_20190530_ndvi0.5.tif"))
+writeRaster(veg_20190606, file.path(path_output, "veg_20190606_ndvi0.5.tif"))
+writeRaster(veg_20190614, file.path(path_output, "veg_20190614_ndvi0.5.tif"))
+writeRaster(veg_20190620, file.path(path_output, "veg_20190620_ndvi0.5.tif"))
+writeRaster(veg_20190703, file.path(path_output, "veg_20190703_ndvi0.5.tif"))
+writeRaster(veg_20190718, file.path(path_output, "veg_20190718_ndvi0.5.tif"))
+writeRaster(veg_20190801, file.path(path_output, "veg_20190801_ndvi0.5.tif"))
+writeRaster(veg_20190808, file.path(path_output, "veg_20190808_ndvi0.5.tif"))
+writeRaster(veg_20190814, file.path(path_output, "veg_20190814_ndvi0.5.tif"))
+writeRaster(veg_20190822, file.path(path_output, "veg_20190822_ndvi0.5.tif"))
+
+```
+
+###function
+```{r}
+#canopy cover 
+cc_extract <- function(veg, shp){
+  num_veg <- raster::extract(veg, shp, fun = function(x,...){sum(!is.na(x))}, df = TRUE)
+  num_tot <- raster::extract(veg, shp, fun = function(x,...){length(x)}, df = TRUE)
+  cc <- data.frame(cc = num_veg$layer/num_tot$layer, Field = shp$FieldID)
+  return(cc)
+}
+
+
+```
+###extraction with the fieldbound
+```{r}
+ccfield5_20190523 <- cc_extract(veg_20190523, FieldBounds5_buff)
+rm(veg_20190523)
+ccfield5_20190530 <- cc_extract(veg_20190530, FieldBounds5_buff)
+rm(veg_20190530)
+ccfield5_20190614 <- cc_extract(veg_20190614, FieldBounds5_buff)
+rm(veg_20190614)
+ccfield5_20190620 <- cc_extract(veg_20190620, FieldBounds5_buff)
+rm(veg_20190620)
+ccfield5_20190626 <- cc_extract(veg_20190626, FieldBounds5_buff)
+rm(veg_20190626)
+ccfield5_20190703 <- cc_extract(veg_20190703, FieldBounds5_buff)
+rm(veg_20190703)
+ccfield5_20190718 <- cc_extract(veg_20190718, FieldBounds5_buff)
+rm(veg_20190718)
+ccfield5_20190801 <- cc_extract(veg_20190801, FieldBounds5_buff)
+rm(veg_20190801)
+ccfield5_20190808 <- cc_extract(veg_20190808, FieldBounds5_buff)
+rm(veg_20190530)
+
+ccfield5_20190814 <- cc_extract(veg_20190814, FieldBounds5_buff)
+ccfield5_20190822 <- cc_extract(veg_20190822, FieldBounds5_buff)
+
+#add dates 
+ccfield5_20190523$date <- as.Date("2019-05-23")
+ccfield5_20190530$date <- as.Date("2019-05-30")
+ccfield5_20190614$date <- as.Date("2019-06-14")
+ccfield5_20190620$date <- as.Date("2019-06-20")
+ccfield5_20190626$date <- as.Date("2019-06-26")
+ccfield5_20190703$date <- as.Date("2019-07-03")
+ccfield5_20190718$date <- as.Date("2019-07-18")
+#ccfield_20190725$date <- as.Date("2019-07-25")
+ccfield5_20190801$date <- as.Date("2019-08-01")
+ccfield5_20190808$date <- as.Date("2019-08-14")
+ccfield5_20190814$date <- as.Date("2019-08-14")
+ccfield5_20190822$date <- as.Date("2019-08-22")
+
+ccfield5_uav <- rbind(ccfield5_20190523, ccfield5_20190530,ccfield5_20190614,ccfield5_20190620, ccfield5_20190626, ccfield5_20190703, ccfield5_20190718,  ccfield5_20190801, ccfield5_20190808, ccfield5_20190814, ccfield5_20190822)
+
+#output
+path_output <- "Z:/CC_UCD_atRR/data2/UAV/Outputs"
+write.csv(ccfield5_uav, file.path(path_output, "ccfield5_uav.csv"), row.names = FALSE)
+
+#read the file
+ccfield5_uav <- read.csv(file.path(path_output, "ccfield5_uav.csv"))
+head(ccfield5_uav)
+ccfield5_uav$date <- as.Date(ccfield5_uav$date)
+ccfield5_uav$Field <- ordered(ccfield5_uav$Field , levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+
+```
+###extraction with the inner buffer from central points
+```{r}
+cccen5_20190523 <- cc_extract(veg_20190523, Cen5_buff)
+cccen5_20190530 <- cc_extract(veg_20190530, Cen5_buff)
+cccen5_20190614 <- cc_extract(veg_20190614, Cen5_buff)
+cccen5_20190620 <- cc_extract(veg_20190620, Cen5_buff)
+cccen5_20190626 <- cc_extract(veg_20190626, Cen5_buff)
+cccen5_20190703 <- cc_extract(veg_20190703, Cen5_buff)
+cccen5_20190718 <- cc_extract(veg_20190718, Cen5_buff)
+cccen5_20190801 <- cc_extract(veg_20190801, Cen5_buff)
+cccen5_20190808 <- cc_extract(veg_20190808, Cen5_buff)
+cccen5_20190814 <- cc_extract(veg_20190814, Cen5_buff)
+cccen5_20190822 <- cc_extract(veg_20190822, Cen5_buff)
+
+#add dates 
+cccen5_20190523$date <- as.Date("2019-05-23")
+cccen5_20190530$date <- as.Date("2019-05-30")
+cccen5_20190614$date <- as.Date("2019-06-14")
+cccen5_20190620$date <- as.Date("2019-06-20")
+cccen5_20190626$date <- as.Date("2019-06-26")
+cccen5_20190703$date <- as.Date("2019-07-03")
+cccen5_20190718$date <- as.Date("2019-07-18")
+#ccfield_20190725$date <- as.Date("2019-07-25")
+cccen5_20190801$date <- as.Date("2019-08-01")
+cccen5_20190808$date <- as.Date("2019-08-14")
+cccen5_20190814$date <- as.Date("2019-08-14")
+cccen5_20190822$date <- as.Date("2019-08-22")
+
+cccen5_uav <- rbind(cccen5_20190523, cccen5_20190530,cccen5_20190614,cccen5_20190620, cccen5_20190626, cccen5_20190703, cccen5_20190718,  cccen5_20190801, cccen5_20190808, cccen5_20190814, cccen5_20190822)
+
+#output
+path_output <- "Z:/CC_UCD_atRR/data2/UAV/Outputs"
+write.csv(cccen5_uav, file.path(path_output, "cccen5_uav.csv"), row.names = FALSE)
+
+#read the file
+cccen5_uav <- read.csv(file.path(path_output, "cccen5_uav.csv"))
+head(cccen5_uav)
+cccen5_uav$date <- as.Date(cccen5_uav$date)
+cccen5_uav$Field <- ordered(cccen5_uav$Field , levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
+
+```
+
+
+#-----------------------------------------------
+#Number of fruit pixels 
+
+##Ground truth from uav 
+```{r}
+bl_class <- function(classification, shp){
+  num_bl <- raster::extract(classification, shp, fun = function(x,...){sum(x[]==1)}, df= TRUE)
+  num_tot <- raster::extract(classification, shp, fun = function(x,...){length(x)}, df = TRUE)
+  bl <- data.frame(bl = num_bl[,2]/num_tot[,2], Field = shp$FieldID)
+  return(bl)
+}
+
+class_20190530 <- raster(file.path(path_class, "Classification_20190530.tif"))
+ccclass5_20190530 <- cc_class(class_20190530, Cen5_buff)
+
+blclass5_20190703 <- bl_class(class_20190703, Cen5_buff)
+blclass5_20190718 <- bl_class(class_20190718, Cen5_buff)
+blclass5_20190725 <- bl_class(class_20190725, Cen5_buff)
+
+```
+
+##read yield data
+```{r}
+path_yield <- "Z:/CC_UCD_atRR/data2/GIS"
+tomyld2019 <- read_excel(file.path(path_yield, "tomyld2019_jaylee.xlsx"))
+dim(tomyld2019)
+names(tomyld2019)[7] <- "Yeild"
+
+#aggregate 
+##plot average
+tomyld2019_plotagg <- aggregate(tomyld2019$Yeild, by = list(tomyld2019$plot_code, tomyld2019$system_code), mean)
+names(tomyld2019_plotagg)  <- c("plot_code", "system_code", "Yield")
+
+##treatment average
+
+ggplot(tomyld2019_plotagg, aes(x = plot_code, y = Yield, fill = system_code)) + geom_bar(stat = "identity")+ylab("Yield (tons/ha)") + xlab("Plot Code")
+ggplot(tomyld2019_plotagg, aes(x = system_code, y = Yield, color = system_code)) + geom_boxplot() + ylab("Yield (tons/ha)") + xlab("System Code")
+
+#only the ones we are focusing on 
+ggplot(subset(tomyld2019_plotagg, plot_code %in% c("4_3","4_4","5_1","5_5","6_5")), aes(x = plot_code, y = Yield, fill = system_code)) + geom_bar(stat = "identity")+ylab("Yield (tons/ha)") + xlab("Plot Code")
+
+```
+
+
+#Phenological Stages 
+##Arable data 
+###Arable yellow bands directly
+```{r}
+#4-3
+par(mfrow = c(2,2))
+plot(subset(aracal_daily_sb, Field == "4-3")$date, subset(aracal_daily_sb, Field == "4-3")$b3r, xlab = "Date", ylab = "Yellow Reflectance", main = "Field 4-3")
+#plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$b3r)
+plot(subset(aracal_daily_sb, Field == "5-1")$date, subset(aracal_daily_sb, Field == "5-1")$b3r, xlab = "Date", ylab = "Yellow Reflectance", main = "Field 5-1")
+plot(subset(aracal_daily_sb, Field == "5-5")$date, subset(aracal_daily_sb, Field == "5-5")$b3r, xlab = "Date", ylab = "Yellow Reflectance", main = "Field 5-5")
+plot(subset(aracal_daily_sb, Field == "6-5")$date, subset(aracal_daily_sb, Field == "6-5")$b3r, xlab = "Date", ylab = "Yellow Reflectance", main = "Field 6-5")
+
+
+
+```
+###Excess yellow indices
+```{r}
+#based on Bin's paper,
+##yellow flower: brightness: (red+green)/blue; enhanced brightness: (red+green)/blue/[(green/blue)*(red-blue+e)]
+
+head(aracal_daily_sb)
+#bloom index 1: yellow/[(green/blue)/(red-blue+e)]
+aracal_daily_sb <- aracal_daily_sb %>% dplyr::mutate(BLI1 = (b3r/((b2r/b1r)*(b4r-b1r+1))))
+#bloom index 2: (red+green)/blue/[(green/blue)/(red-blue+e)]
+aracal_daily_sb <- aracal_daily_sb %>% dplyr::mutate(BLI2 = (b4r+b2r)/b1r/((b2r/b1r)*(b4r-b1r+1)))
+#bloom index 3: (red+green)/blue
+aracal_daily_sb <- aracal_daily_sb %>% dplyr::mutate(BLI3 = (b4r+b2r)/b1r)
+
+#BLI1
+par(mfrow = c(2,2))
+plot(subset(aracal_daily_sb, Field == "4-3")$date, subset(aracal_daily_sb, Field == "4-3")$BLI1, xlab = "Date", ylab = "Bloom Index 1", main = "Field 4-3")
+#plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$b3r)
+plot(subset(aracal_daily_sb, Field == "5-1")$date, subset(aracal_daily_sb, Field == "5-1")$BLI1, xlab = "Date", ylab = "Bloom Index 1", main = "Field 5-1")
+plot(subset(aracal_daily_sb, Field == "5-5")$date, subset(aracal_daily_sb, Field == "5-5")$BLI1, xlab = "Date", ylab = "Bloom Index 1", main = "Field 5-5")
+plot(subset(aracal_daily_sb, Field == "6-5")$date, subset(aracal_daily_sb, Field == "6-5")$BLI1, xlab = "Date", ylab = "Bloom Index 1", main = "Field 6-5")
+plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$BLI1, xlab = "Date", ylab = "Bloom Index 1", main = "Field 6-5")
+
+
+#BLI2
+par(mfrow = c(3,2))
+plot(subset(aracal_daily_sb, Field == "4-3"& date > "2019-06-25" & date < "2019-07-15")$date, subset(aracal_daily_sb, Field == "4-3"& date > "2019-06-25" & date < "2019-07-15")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from Arable", main = "Field 4-3", ylim=c(1.8,2.0)) + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2") 
+#plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$b3r)
+plot(subset(aracal_daily_sb, Field == "5-1")$date, subset(aracal_daily_sb, Field == "5-1")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from Arable", main = "Field 5-1", ylim=c(1.8,2.2))  + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "5-5")$date, subset(aracal_daily_sb, Field == "5-5")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from Arable", main = "Field 5-5", ylim=c(1.8,2.2)) + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "6-5", ylim=c(1.8,2.2))$date, subset(aracal_daily_sb, Field == "6-5")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from Arable", main = "Field 6-5")  + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "4-4", ylim=c(1.8,2.2))$date, subset(aracal_daily_sb, Field == "4-4")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from Arable", main = "Field 4-4")  + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+
+#BLI3
+par(mfrow = c(2,2))
+plot(subset(aracal_daily_sb, Field == "4-3")$date, subset(aracal_daily_sb, Field == "4-3")$BLI3, xlab = "Date", ylab = "Bloom Index 3", main = "Field 4-3")
+#plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$b3r)
+plot(subset(aracal_daily_sb, Field == "5-1")$date, subset(aracal_daily_sb, Field == "5-1")$BLI3, xlab = "Date", ylab = "Bloom Index 3", main = "Field 5-1")
+plot(subset(aracal_daily_sb, Field == "5-5")$date, subset(aracal_daily_sb, Field == "5-5")$BLI3, xlab = "Date", ylab = "Bloom Index 3", main = "Field 5-5")
+plot(subset(aracal_daily_sb, Field == "6-5")$date, subset(aracal_daily_sb, Field == "6-5")$BLI3, xlab = "Date", ylab = "Bloom Index 3", main = "Field 6-5")
+plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$BLI3, xlab = "Date", ylab = "Bloom Index 3", main = "Field 6-5")
+
+```
+
+###Arable red bands
+```{r}
+par(mfrow = c(2,2))
+plot(subset(aracal_daily_sb, Field == "4-3")$date, subset(aracal_daily_sb, Field == "4-3")$b4r, xlab = "Date", ylab = "Red Reflectance", main = "Field 4-3")
+#plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$b3r)
+plot(subset(aracal_daily_sb, Field == "5-1")$date, subset(aracal_daily_sb, Field == "5-1")$b4r, xlab = "Date", ylab = "Red Reflectance", main = "Field 5-1")
+plot(subset(aracal_daily_sb, Field == "5-5")$date, subset(aracal_daily_sb, Field == "5-5")$b4r, xlab = "Date", ylab = "Red Reflectance", main = "Field 5-5")
+plot(subset(aracal_daily_sb, Field == "6-5")$date, subset(aracal_daily_sb, Field == "6-5")$b4r, xlab = "Date", ylab = "Red Reflectance", main = "Field 6-5")
+
+###After smoothing 
+
+```
+
+###Excess red indices
+```{r}
+aracal_daily_sb <- aracal_daily_sb %>% dplyr::mutate(BLI1 = (b3r/((b2r/b1r)*(b4r-b1r+1))))
+
+#fruit index 1: red/green/(green/blue*(red-blue+1))
+aracal_daily_sb <- aracal_daily_sb %>% dplyr::mutate(FRI1 = b4r/b2r/((b2r/b1r)*(b4r-b1r+1)))
+#fruit index 2: red/(green/blue*(red-blue+1))
+aracal_daily_sb <- aracal_daily_sb %>% dplyr::mutate(FRI2 = b4r/((b2r/b1r)*(b4r-b1r+1)))
+
+#fruit index 1
+par(mfrow = c(3,2))
+plot(subset(aracal_daily_sb, Field == "4-3")$date, subset(aracal_daily_sb, Field == "4-3")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from Arable", main = "Field 4-3") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "5-1")$date, subset(aracal_daily_sb, Field == "5-1")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from Arable", main = "Field 5-1") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "5-5")$date, subset(aracal_daily_sb, Field == "5-5")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from Arable", main = "Field 5-5") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "6-5")$date, subset(aracal_daily_sb, Field == "6-5")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from Arable", main = "Field 6-5") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from Arable", main = "Field 4-4") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+
+
+#fruit index 2
+par(mfrow = c(2,2))
+plot(subset(aracal_daily_sb, Field == "4-3")$date, subset(aracal_daily_sb, Field == "4-3")$FRI2, xlab = "Date", ylab = "Fruit Index 2", main = "Field 4-3")
+#plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$b3r)
+plot(subset(aracal_daily_sb, Field == "5-1")$date, subset(aracal_daily_sb, Field == "5-1")$FRI2, xlab = "Date", ylab = "Fruit Index 2", main = "Field 5-1")
+plot(subset(aracal_daily_sb, Field == "5-5")$date, subset(aracal_daily_sb, Field == "5-5")$FRI2, xlab = "Date", ylab = "Fruit Index 2", main = "Field 5-5")
+plot(subset(aracal_daily_sb, Field == "6-5")$date, subset(aracal_daily_sb, Field == "6-5")$FRI2, xlab = "Date", ylab = "Fruit Index 2", main = "Field 6-5")
+plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$FRI2, xlab = "Date", ylab = "Fruit Index 2", main = "Field 6-5")
+
+```
+
+###Brightness index
+```{r}
+
+head(aracal_daily_sb)
+#bloom index 1: yellow/[(green/blue)/(red-blue+e)]
+aracal_daily_sb <- aracal_daily_sb %>% dplyr::mutate(BRI1 = ((b4r+b2r+b1r)/((b2r/b1r)*(b4r-b1r+1))))
+#brightness index 1
+par(mfrow = c(3,2))
+plot(subset(aracal_daily_sb, Field == "4-3")$date, subset(aracal_daily_sb, Field == "4-3")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 4-3") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "5-1")$date, subset(aracal_daily_sb, Field == "5-1")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 5-1") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "5-5")$date, subset(aracal_daily_sb, Field == "5-5")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 5-5") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "6-5")$date, subset(aracal_daily_sb, Field == "6-5")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 6-5") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+plot(subset(aracal_daily_sb, Field == "4-4")$date, subset(aracal_daily_sb, Field == "4-4")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 4-4") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+
+```
+
+
+##Planetscope data
+###Read and process 
+```{r}
+path_pl <- "Z:/CC_UCD_atRR/data2/Planetscope"
+Cen5mean_pl <- read.csv(file.path(path_pl, "Cen5mean_PL.csv"))
+head(Cen5mean_pl)
+str(Cen5mean_pl)
+Cen5mean_pl$Date <- as.Date(Cen5mean_pl$Date)
+Cen5mean_pl$Filename <- as.character(Cen5mean_pl$Filename)
+#subset
+Cen5mean_pl <- subset(Cen5mean_pl, Date > "2019-04-20")
+
+#calculate indices
+##ndvi
+Cen5mean_pl <- Cen5mean_pl %>% mutate(NDVI = (B4-B3)/(B4+B3))
+head(Cen5mean_pl)
+
+
+ggplot(Cen5mean_pl, aes(x = Date , y= NDVI, color = Field))+geom_line() + geom_point()
+
+#merge with the clean subset
+PL_clean <- read_excel(file.path(path_pl, "Planetscope_RRsubset_clean_unique1.xlsx"))
+names(PL_clean) <- c("Filename", "CloudCover","Complete")
+#use merge function 
+Cen5mean_pl_clean <- merge(PL_clean, Cen5mean_pl, by = "Filename")
+Cen5mean_pl_clean$CloudCover <- NULL
+Cen5mean_pl_clean$Complete <- NULL
+dim(Cen5mean_pl_clean)
+Cen5mean_pl_clean <- Cen5mean_pl_clean[Cen5mean_pl_clean$Date!="2019-07-21",]
+dim(Cen5mean_pl_clean)
+#plot 
+ggplot(Cen5mean_pl_clean, aes(x = Date, y= NDVI,color = Field))  + geom_point() + geom_smooth(method = "loess", se = FALSE)
+ggplot(Cen5mean_pl_clean, aes(x = Date, y= NDVI,color = Field))  + geom_point() + geom_smooth(method = "loess", se = FALSE) 
+
+
+```
+###Fruit Index 
+```{r}
+#fruit index 1: red/green/(green/blue*(red-blue+1))
+#fruit index 2: red/(green/blue*(red-blue+1))
+Cen5mean_pl_clean <- Cen5mean_pl_clean %>% mutate(FRI1 = B3/B2/(B2/B1*(B3-B1+1)))
+Cen5mean_pl_clean <- Cen5mean_pl_clean %>% mutate(FRI2 = B3/(B2/B1*(B3-B1+1)))
+
+#plots of the fruit index 1, this is the good one
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_pl_clean, Field == "4-3")$Date, subset(Cen5mean_pl_clean, Field == "4-3")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from PS", main = "Field 4-3")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "5-1")$Date, subset(Cen5mean_pl_clean, Field == "5-1")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from PS", main = "Field 5-1")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "5-5")$Date, subset(Cen5mean_pl_clean, Field == "5-5")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from PS", main = "Field 5-5")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "6-5")$Date, subset(Cen5mean_pl_clean, Field == "6-5")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from PS", main = "Field 6-5")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "4-4")$Date, subset(Cen5mean_pl_clean, Field == "4-4")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from PS", main = "Field 4-4")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+
+#plots OF the fruit index 2
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_pl_clean, Field == "4-3")$Date, subset(Cen5mean_pl_clean, Field == "4-3")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from PS", main = "Field 4-3")
+plot(subset(Cen5mean_pl_clean, Field == "5-1")$Date, subset(Cen5mean_pl_clean, Field == "5-1")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from PS", main = "Field 5-1")
+plot(subset(Cen5mean_pl_clean, Field == "5-5")$Date, subset(Cen5mean_pl_clean, Field == "5-5")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from PS", main = "Field 5-5")
+plot(subset(Cen5mean_pl_clean, Field == "6-5")$Date, subset(Cen5mean_pl_clean, Field == "6-5")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from PS", main = "Field 6-5")
+plot(subset(Cen5mean_pl_clean, Field == "4-4")$Date, subset(Cen5mean_pl_clean, Field == "4-4")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from PS", main = "Field 6-5")
+
+#Plots of the red bands
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_pl_clean, Field == "4-3")$Date, subset(Cen5mean_pl_clean, Field == "4-3")$B3, xlab = "Date", ylab = "Fruit Index from PS", main = "Field 4-3")
+plot(subset(Cen5mean_pl_clean, Field == "5-1")$Date, subset(Cen5mean_pl_clean, Field == "5-1")$B3, xlab = "Date", ylab = "Fruit Index from PS", main = "Field 5-1")
+plot(subset(Cen5mean_pl_clean, Field == "5-5")$Date, subset(Cen5mean_pl_clean, Field == "5-5")$B3, xlab = "Date", ylab = "Fruit Index from PS", main = "Field 5-5")
+plot(subset(Cen5mean_pl_clean, Field == "6-5")$Date, subset(Cen5mean_pl_clean, Field == "6-5")$B3, xlab = "Date", ylab = "Fruit Index from PS", main = "Field 6-5")
+plot(subset(Cen5mean_pl_clean, Field == "4-4")$Date, subset(Cen5mean_pl_clean, Field == "4-4")$B3, xlab = "Date", ylab = "Fruit Index from PS", main = "Field 6-5")
+
+```
+###Bloom Index 
+```{r}
+names(Cen5mean_pl_clean)
+
+#Bloom Index 1: (red+green)/blue
+Cen5mean_pl_clean <- Cen5mean_pl_clean %>% mutate(BLI1 = (B3+B2)/B1)
+#plots
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_pl_clean, Field == "4-3" )$Date, subset(Cen5mean_pl_clean, Field == "4-3")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 4-3")
+plot(subset(Cen5mean_pl_clean, Field == "5-1")$Date, subset(Cen5mean_pl_clean, Field == "5-1")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 5-1")
+plot(subset(Cen5mean_pl_clean, Field == "5-5")$Date, subset(Cen5mean_pl_clean, Field == "5-5")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 5-5")
+plot(subset(Cen5mean_pl_clean, Field == "6-5")$Date, subset(Cen5mean_pl_clean, Field == "6-5")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 6-5")
+plot(subset(Cen5mean_pl_clean, Field == "4-4")$Date, subset(Cen5mean_pl_clean, Field == "4-4")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 4-4")
+
+#Bloom Index 2: (red+green)/blue/[(green/blue)/(red-blue+e)]
+Cen5mean_pl_clean <- Cen5mean_pl_clean %>% mutate(BLI2 = (B3+B2)/B1/((B2/B1)*(B3-B1+1)))
+#plots
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_pl_clean, Field == "4-3"& Date > "2019-06-25" & Date < "2019-07-15")$Date, subset(Cen5mean_pl_clean, Field == "4-3"& Date > "2019-06-25" & Date < "2019-07-15")$BLI2, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 4-3", ylim = c(1.7,1.9))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "5-1"& Date > "2019-06-25" & Date < "2019-07-15")$Date, subset(Cen5mean_pl_clean, Field == "5-1"& Date > "2019-06-25" & Date < "2019-07-15")$BLI2, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 5-1", ylim = c(1.7,1.9))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "5-5"& Date > "2019-06-25" & Date < "2019-07-15")$Date, subset(Cen5mean_pl_clean, Field == "5-5"& Date > "2019-06-25" & Date < "2019-07-15")$BLI2, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 5-5", ylim = c(1.7,1.9))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "6-5"& Date > "2019-06-25" & Date < "2019-07-15")$Date, subset(Cen5mean_pl_clean, Field == "6-5"& Date > "2019-06-25" & Date < "2019-07-15")$BLI2, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 6-5", ylim = c(1.7,1.9))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "4-4"& Date > "2019-06-25" & Date < "2019-07-15")$Date, subset(Cen5mean_pl_clean, Field == "4-4"& Date > "2019-06-25" & Date < "2019-07-15")$BLI2, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 4-4", ylim = c(1.7,1.9))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+
+```
+###Brightness index
+```{r}
+
+head(Cen5mean_pl_clean)
+Cen5mean_pl_clean <- Cen5mean_pl_clean %>% dplyr::mutate(BRI1 = ((B1+B2+B3)/((B2/B1)*(B3-B1+1))))
+#brightness index 1
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_pl_clean, Field == "4-3")$Date, subset(Cen5mean_pl_clean, Field == "4-3")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 4-3") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "5-1")$Date, subset(Cen5mean_pl_clean, Field == "5-1")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 5-1") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "5-5")$Date, subset(Cen5mean_pl_clean, Field == "5-5")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 5-5") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "6-5")$Date, subset(Cen5mean_pl_clean, Field == "6-5")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 6-5") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+plot(subset(Cen5mean_pl_clean, Field == "4-4")$Date, subset(Cen5mean_pl_clean, Field == "4-4")$BRI1, xlab = "Date", ylab = "brightness Index 1 from Arable", main = "Field 4-4") + abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-08"), col = "red2")
+
+```
+
+##Sentinel-2 data
+###Bloom Index
+```{r}
+names(Cen5mean_sen2)
+#Bloom Index 1: (red+green)/blue
+Cen5mean_sen2 <- Cen5mean_sen2 %>% mutate(BLI1 = (B4+B3)/B2)
+#plots
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_sen2, Field == "4-3")$Date, subset(Cen5mean_sen2, Field == "4-3")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 4-3")
+plot(subset(Cen5mean_sen2, Field == "5-1")$Date, subset(Cen5mean_sen2, Field == "5-1")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 5-1")
+plot(subset(Cen5mean_sen2, Field == "5-5")$Date, subset(Cen5mean_sen2, Field == "5-5")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 5-5")
+plot(subset(Cen5mean_sen2, Field == "6-5")$Date, subset(Cen5mean_sen2, Field == "6-5")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 6-5")
+plot(subset(Cen5mean_sen2, Field == "4-4")$Date, subset(Cen5mean_sen2, Field == "4-4")$BLI1, xlab = "Date", ylab = "Bloom Index from PS", main = "Field 4-4") 
+#The results is not good 
+
+
+#Bloom Index 2: (red+green)/blue/[(green/blue)/(red-blue+e)]
+Cen5mean_sen2 <- Cen5mean_sen2 %>% mutate(BLI2 = (B4+B3)/B2/((B3/B2)*(B4-B2+1)))
+#plots
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_sen2, Field == "4-3"& Date > "2019-06-01" & Date < "2019-08-15")$Date, subset(Cen5mean_sen2, Field == "4-3"& Date > "2019-06-01" & Date < "2019-08-15")$BLI2, xlab = "Date", ylab = "Bloom Index from S2", main = "Field 4-3", ylim = c(1.7, 2.2))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_sen2, Field == "5-1"& Date > "2019-06-01" & Date < "2019-08-15")$Date, subset(Cen5mean_sen2, Field == "5-1"& Date > "2019-06-01" & Date < "2019-08-15")$BLI2, xlab = "Date", ylab = "Bloom Index from S2", main = "Field 5-1", ylim = c(1.7, 2.2))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_sen2, Field == "5-5"& Date > "2019-06-01" & Date < "2019-08-15")$Date, subset(Cen5mean_sen2, Field == "5-5"& Date > "2019-06-01" & Date < "2019-08-15")$BLI2, xlab = "Date", ylab = "Bloom Index from S2", main = "Field 5-5", ylim = c(1.7, 2.2))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_sen2, Field == "6-5"& Date > "2019-06-01" & Date < "2019-08-15")$Date, subset(Cen5mean_sen2, Field == "6-5"& Date > "2019-06-01" & Date < "2019-08-15")$BLI2, xlab = "Date", ylab = "Bloom Index from S2", main = "Field 6-5", ylim = c(1.7, 2.2))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_sen2, Field == "4-4"& Date > "2019-06-01" & Date < "2019-08-15")$Date, subset(Cen5mean_sen2, Field == "4-4"& Date > "2019-06-01" & Date < "2019-08-15")$BLI2, xlab = "Date", ylab = "Bloom Index from S2", main = "Field 4-4", ylim = c(1.7, 2.2))+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+
+
+```
+###Fruit Index
+```{r}
+#fruit index 1: red/green/(green/blue*(red-blue+1))
+#fruit index 2: red/(green/blue*(red-blue+1))
+Cen5mean_sen2 <- Cen5mean_sen2 %>% mutate(FRI1 = B4/B3/(B3/B2*(B4-B3+1)))
+Cen5mean_sen2 <- Cen5mean_sen2 %>% mutate(FRI2 = B4/(B3/B2*(B4-B2+1)))
+#Cen5mean_sen2 <- Cen5mean_sen2 %>% mutate(FRI3 = (0.00546875+B4-B3)/(B3/B2*(B4-B2+1)))
+Cen5mean_sen2 <- Cen5mean_sen2 %>% mutate(FRI3 = (1.4*B4-B3)/(B3/B2*(B4-B2+1)))
+
+#plots of FRI1: 
+par(mfrow = c(3,2))
+plot(x = subset(Cen5mean_sen2, Field == "4-3")$Date, y= subset(Cen5mean_sen2, Field == "4-3")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from S2", main = "Field 4-3")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_sen2, Field == "5-1")$Date, subset(Cen5mean_sen2, Field == "5-1")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from S2", main = "Field 5-1")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_sen2, Field == "5-5")$Date, subset(Cen5mean_sen2, Field == "5-5")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from S2", main = "Field 5-5")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_sen2, Field == "6-5")$Date, subset(Cen5mean_sen2, Field == "6-5")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from S2", main = "Field 6-5")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(Cen5mean_sen2, Field == "4-4")$Date, subset(Cen5mean_sen2, Field == "4-4")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from S2", main = "Field 4-4")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+
+#plots of FRI2
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_sen2, Field == "4-3")$Date, subset(Cen5mean_sen2, Field == "4-3")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 4-3")
+plot(subset(Cen5mean_sen2, Field == "5-1")$Date, subset(Cen5mean_sen2, Field == "5-1")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 5-1")
+plot(subset(Cen5mean_sen2, Field == "5-5")$Date, subset(Cen5mean_sen2, Field == "5-5")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 5-5")
+plot(subset(Cen5mean_sen2, Field == "6-5")$Date, subset(Cen5mean_sen2, Field == "6-5")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 6-5")
+plot(subset(Cen5mean_sen2, Field == "4-4")$Date, subset(Cen5mean_sen2, Field == "4-4")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 6-5")
+
+#Plots of the red bands
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_sen2, Field == "4-3")$Date, subset(Cen5mean_sen2, Field == "4-3")$B4, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 4-3")
+plot(subset(Cen5mean_sen2, Field == "5-1")$Date, subset(Cen5mean_sen2, Field == "5-1")$B4, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 5-1")
+plot(subset(Cen5mean_sen2, Field == "5-5")$Date, subset(Cen5mean_sen2, Field == "5-5")$B4, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 5-5")
+plot(subset(Cen5mean_sen2, Field == "6-5")$Date, subset(Cen5mean_sen2, Field == "6-5")$B4, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 6-5")
+plot(subset(Cen5mean_sen2, Field == "4-4")$Date, subset(Cen5mean_sen2, Field == "4-4")$B4, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 6-5")
+
+#plots of the FRI3
+par(mfrow = c(3,2))
+plot(subset(Cen5mean_sen2, Field == "4-3")$Date, subset(Cen5mean_sen2, Field == "4-3")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 4-3")
+plot(subset(Cen5mean_sen2, Field == "5-1")$Date, subset(Cen5mean_sen2, Field == "5-1")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 5-1")
+plot(subset(Cen5mean_sen2, Field == "5-5")$Date, subset(Cen5mean_sen2, Field == "5-5")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 5-5")
+plot(subset(Cen5mean_sen2, Field == "6-5")$Date, subset(Cen5mean_sen2, Field == "6-5")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 6-5")
+plot(subset(Cen5mean_sen2, Field == "4-4")$Date, subset(Cen5mean_sen2, Field == "4-4")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 6-5")
+
+```
+##UAV data
+###Bloom Index 
+```{r}
+names(cen5mean_uav)
+#Bloom Index 1: (red+green)/blue
+cen5mean_uav <- cen5mean_uav %>% mutate(BLI1 = (red+green)/blue)
+#plots
+par(mfrow = c(3,2))
+plot(subset(cen5mean_uav, Field == "4-3")$date, subset(cen5mean_uav, Field == "4-3")$BLI1, xlab = "Date", ylab = "Bloom Index 1 from UAV", main = "Field 4-3")
+plot(subset(cen5mean_uav, Field == "5-1")$date, subset(cen5mean_uav, Field == "5-1")$BLI1, xlab = "Date", ylab = "Bloom Index 1 from UAV", main = "Field 5-1")
+plot(subset(cen5mean_uav, Field == "5-5")$date, subset(cen5mean_uav, Field == "5-5")$BLI1, xlab = "Date", ylab = "Bloom Index 1 from UAV", main = "Field 5-5")
+plot(subset(cen5mean_uav, Field == "6-5")$date, subset(cen5mean_uav, Field == "6-5")$BLI1, xlab = "Date", ylab = "Bloom Index 1 from UAV", main = "Field 6-5")
+plot(subset(cen5mean_uav, Field == "4-4")$date, subset(cen5mean_uav, Field == "4-4")$BLI1, xlab = "Date", ylab = "Bloom Index 1 from UAV", main = "Field 4-4") 
+#The results is not bad 
+
+
+#Bloom Index 2: (red+green)/blue/[(green/blue)/(red-blue+e)]
+cen5mean_uav <- cen5mean_uav %>% mutate(BLI2 = (red+green)/blue/((green/blue)*(red-blue+1)))
+#plots
+par(mfrow = c(3,2))
+plot(subset(cen5mean_uav, Field == "4-3")$date, subset(cen5mean_uav, Field == "4-3")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from UAV", main = "Field 4-3")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(cen5mean_uav, Field == "5-1")$date, subset(cen5mean_uav, Field == "5-1")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from UAV", main = "Field 5-1")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(cen5mean_uav, Field == "5-5")$date, subset(cen5mean_uav, Field == "5-5")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from UAV", main = "Field 5-5")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(cen5mean_uav, Field == "6-5")$date, subset(cen5mean_uav, Field == "6-5")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from UAV", main = "Field 6-5")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(cen5mean_uav, Field == "4-4")$date, subset(cen5mean_uav, Field == "4-4")$BLI2, xlab = "Date", ylab = "Bloom Index 2 from UAV", main = "Field 4-4")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+
+
+```
+###Fruit Index
+```{r}
+#fruit index 1: red/green/(green/blue*(red-blue+1))
+#fruit index 2: red/(green/blue*(red-blue+1))
+cen5mean_uav <- cen5mean_uav %>% mutate(FRI1 = red/green/(green/blue*(red-blue+1)))
+cen5mean_uav <- cen5mean_uav %>% mutate(FRI2 = red/(green/blue*(red-blue+1)))
+#cen5mean_uav <- cen5mean_uav %>% mutate(FRI3 = (0.00546875+B4-B3)/(B3/B2*(B4-B2+1)))
+cen5mean_uav <- cen5mean_uav %>% mutate(FRI3 = (1.4*red-green)/(green/blue*(red-blue+1)))
+
+#plots of FRI1: 
+par(mfrow = c(3,2))
+plot(x = subset(cen5mean_uav, Field == "4-3")$date, y= subset(cen5mean_uav, Field == "4-3")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from UAV", main = "Field 4-3")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(cen5mean_uav, Field == "5-1")$date, subset(cen5mean_uav, Field == "5-1")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from UAV", main = "Field 5-1")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(cen5mean_uav, Field == "5-5")$date, subset(cen5mean_uav, Field == "5-5")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from UAV", main = "Field 5-5")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(cen5mean_uav, Field == "6-5")$date, subset(cen5mean_uav, Field == "6-5")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from UAV", main = "Field 6-5")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+plot(subset(cen5mean_uav, Field == "4-4")$date, subset(cen5mean_uav, Field == "4-4")$FRI1, xlab = "Date", ylab = "Fruit Index 1 from UAV", main = "Field 4-4")+ abline(v = as.Date("2019-07-11"), col = "gold2") + abline(v = as.Date("2019-07-18"), col = "green4") + abline(v = as.Date("2019-08-01"), col = "red2")
+
+#plots of FRI2
+par(mfrow = c(3,2))
+plot(subset(cen5mean_uav, Field == "4-3")$date, subset(cen5mean_uav, Field == "4-3")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 4-3")
+plot(subset(cen5mean_uav, Field == "5-1")$date, subset(cen5mean_uav, Field == "5-1")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 5-1")
+plot(subset(cen5mean_uav, Field == "5-5")$date, subset(cen5mean_uav, Field == "5-5")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 5-5")
+plot(subset(cen5mean_uav, Field == "6-5")$date, subset(cen5mean_uav, Field == "6-5")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 6-5")
+plot(subset(cen5mean_uav, Field == "4-4")$date, subset(cen5mean_uav, Field == "4-4")$FRI2, xlab = "Date", ylab = "Fruit Index 2 from S2", main = "Field 6-5")
+
+#Plots of the red bands
+par(mfrow = c(3,2))
+plot(subset(cen5mean_uav, Field == "4-3")$date, subset(cen5mean_uav, Field == "4-3")$red, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 4-3")
+plot(subset(cen5mean_uav, Field == "5-1")$date, subset(cen5mean_uav, Field == "5-1")$red, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 5-1")
+plot(subset(cen5mean_uav, Field == "5-5")$date, subset(cen5mean_uav, Field == "5-5")$red, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 5-5")
+plot(subset(cen5mean_uav, Field == "6-5")$date, subset(cen5mean_uav, Field == "6-5")$red, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 6-5")
+plot(subset(cen5mean_uav, Field == "4-4")$date, subset(cen5mean_uav, Field == "4-4")$B4, xlab = "Date", ylab = "Fruit Index from S2", main = "Field 6-5")
+
+#plots of the FRI3
+par(mfrow = c(3,2))
+plot(subset(cen5mean_uav, Field == "4-3")$date, subset(cen5mean_uav, Field == "4-3")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 4-3")
+plot(subset(cen5mean_uav, Field == "5-1")$date, subset(cen5mean_uav, Field == "5-1")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 5-1")
+plot(subset(cen5mean_uav, Field == "5-5")$date, subset(cen5mean_uav, Field == "5-5")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 5-5")
+plot(subset(cen5mean_uav, Field == "6-5")$date, subset(cen5mean_uav, Field == "6-5")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 6-5")
+plot(subset(cen5mean_uav, Field == "4-4")$date, subset(cen5mean_uav, Field == "4-4")$FRI3, xlab = "Date", ylab = "Fruit Index 3 from S2", main = "Field 6-5")
+```
+##BLI from UAV 
+```{r}
+
+BLI_uav_20190703 <- (uav_20190703$red+uav_20190703$green)/uav_20190703$blue/((uav_20190703$green/uav_20190703$blue)*(uav_20190703$red-uav_20190703$blue+1))
+BLI_uav_20190703[BLI_uav_20190703<(-100)] <-  NA
+writeRaster(BLI_uav_20190703, file.path(path_output, "BLI_uav_20190703.tif"))
+rm(BLI_uav_20190703)
+
+BLI_uav_20190718 <- (uav_20190718$red+uav_20190718$green)/uav_20190718$blue/((uav_20190718$green/uav_20190718$blue)*(uav_20190718$red-uav_20190718$blue+1))
+BLI_uav_20190718[BLI_uav_20190718<(-100)] <-  NA
+writeRaster(BLI_uav_20190718, file.path(path_output, "BLI_uav_20190718.tif"))
+rm(BLI_uav_20190718)
+
+BLI_uav_20190725 <- (uav_20190725$red+uav_20190725$green)/uav_20190725$blue/((uav_20190725$green/uav_20190725$blue)*(uav_20190725$red-uav_20190725$blue+1))
+writeRaster(BLI_uav_20190725, file.path(path_output, "BLI_uav_20190725.tif"))
+rm(BLI_uav_20190725)
+
+FRI_uav_20190801 <- uav_20190801$red/uav_20190801$green/(uav_20190801$green/uav_20190801$blue*(uav_20190801$red-uav_20190801$blue+1))
+writeRaster(FRI_uav_20190801, file.path(path_output, "FRI_uav_20190801.tif"))
+rm(FRI_uav_20190801)
+
+FRI_uav_20190808 <- uav_20190808$red/uav_20190808$green/(uav_20190808$green/uav_20190808$blue*(uav_20190808$red-uav_20190808$blue+1))
+writeRaster(FRI_uav_20190808, file.path(path_output, "FRI_uav_20190808.tif"))
+rm(FRI_uav_20190808)
+
+FRI_uav_20190814 <- uav_20190814$red/uav_20190814$green/(uav_20190814$green/uav_20190814$blue*(uav_20190814$red-uav_20190814$blue+1))
+writeRaster(FRI_uav_20190814, file.path(path_output, "FRI_uav_20190814.tif"))
+rm(FRI_uav_20190814)
+
+FRI_uav_20190822 <- uav_20190822$red/uav_20190822$green/(uav_20190822$green/uav_20190822$blue*(uav_20190822$red-uav_20190822$blue+1))
+writeRaster(FRI_uav_20190822, file.path(path_output, "FRI_uav_20190822.tif"))
+rm(FRI_uav_20190822)
+
+
+
+sample1 <- read_uav(path_output, "RR_20190822_stacks2_Clip1.tif")
+FRI_sample1 <- sample1$red/sample1$green/(sample1$green/sample1$blue*(sample1$red-sample1$blue+1))
+writeRaster(FRI_sample1, file.path(path_output, "FRI_sample1.tif"))
+```
+###Read BLI 
+```{r}
+FRI_uav_20190801 <- raster(file.path(path_output,'FRI_uav_20190801.tif'))
+FRI_uav_20190801[FRI_uav_20190801< (-100)] <- NA 
+plot(FRI_uav_20190801)
+```
+
+
+```{r}
+
+#canopy cover 
+cc_extract <- function(veg, shp){
+  num_veg <- raster::extract(veg, shp, fun = function(x,...){sum(!is.na(x))}, df = TRUE)
+  num_tot <- raster::extract(veg, shp, fun = function(x,...){length(x)}, df = TRUE)
+  cc <- data.frame(cc = num_veg$layer/num_tot$layer, Field = shp$FieldID)
+  return(cc)
+}
+
+```
+
+
+##Cross comparison of BL2 and FRI1 of Sen2 and
+```{r}
+#uav and sen2
+BLI_uavsen2 <- cbind(Cen5)
+```
+
+
+#Growing degree days 
+##Use CIMIS Davis daily data
+```{r}
+path_cimis <- "Z:/CC_UCD_atRR/data1/Weather/CIMIS"
+cimis_daily_gdd <- read.csv(file.path(path_cimis, "cimis_davis_20190410_20191001.csv"))
+names(cimis_daily_gdd)
+
+#subset
+cimis_daily_gdd <- cimis_daily_gdd[,c("Date","Stn.Name", "Max.Air.Temp..C.", "Avg.Air.Temp..C.", "Min.Air.Temp..C.","ETo..mm.","Sol.Rad..W.sq.m.", "Precip..mm.")] 
+names(cimis_daily_gdd) <- c("date", "device", "maxT", "meanT", "minT", "ET", "solrad", "precip")
+
+#subset
+#remove the last row
+cimis_daily_gdd <- na.omit(cimis_daily_gdd)
+cimis_daily_gdd$date <- as.Date(as.character(cimis_daily_gdd$date), "%m/%d/%Y")
+cimis_daily_gdd <- subset(cimis_daily_gdd, date >= "2019-04-19")
+
+#calculate GDD
+gdd_tomato <- pollen::gdd(tmax = cimis_daily_gdd$maxT, tmin  = cimis_daily_gdd$minT, tbase  = 10, tbase_max = 30)
+gdd_tomato <- data.frame("date"=cimis_daily_gdd$date, "GDD" = gdd_tomato)
+gdd_tomato$DOY <- lubridate::yday(gdd_tomato$date)
+```
+
+
+#Yield data
+##with Fruit Index
+```{r}
+a1 <- merge(yd, subset(aracal_daily_sb, date == "2019-08-14"), by = "Field")
+a1
+par(mfrow = c(1,1))
+plot(a1$Yield, a1$FRI1)
+
+a2 <- merge(yd, subset(cen5mean_uav, date=="2019-08-14"), by = "Field")
+plot(a2$Yield, a2$FRI1)
+```
+
+##with NDVI
+```{r}
+yd <- subset(tomyld2019_plotagg, plot_code %in% c("4_3","4_4","5_1","5_5","6_5"))
+names(yd)[1] <- "Field"
+yd$Field <- as.factor(c("5-1","5-5", "4-4","4-3","6-5"))
+
+#arable
+NDVI1_aracal <- aggregate(aracal_daily_sb$NDVI_ft, by = list(aracal_daily_sb$Field), FUN = max)
+names(NDVI1_aracal) <- c("Field", "NDVI_max")
+yd_NDVI1_aracal <- merge(yd, NDVI1_aracal, by = "Field")
+ggplot(yd_NDVI1_aracal, aes(x = NDVI_max, y = Yield)) + geom_point(aes(color = Field)) + geom_smooth(se = FALSE, method = "lm") + ggtitle("Arable")
+cor(yd_NDVI1_aracal$Yield, yd_NDVI1_aracal$NDVI_max)^2
+#PL
+NDVI1_pl <- aggregate(Cen5mean_pl_clean$NDVI, by = list(Cen5mean_pl_clean$Field), FUN = max)
+names(NDVI1_pl) <- c("Field", "NDVI_max")
+yd_NDVI1_pl <- merge(yd, NDVI1_pl, by = "Field")
+ggplot(yd_NDVI1_pl, aes(x = NDVI_max, y = Yield)) + geom_point(aes(color = Field)) + geom_smooth(se = FALSE, method = "lm") + ggtitle("Planetscope")
+cor(yd_NDVI1_pl$Yield, yd_NDVI1_pl$NDVI_max)^2
+#SEN2
+NDVI1_sen2 <- aggregate(Cen5mean_sen2$NDVI, by = list(Cen5mean_sen2$Field), FUN = max)
+names(NDVI1_sen2) <- c("Field", "NDVI_max")
+yd_NDVI1_sen2 <- merge(yd, NDVI1_sen2, by = "Field")
+ggplot(yd_NDVI1_sen2, aes(x = NDVI_max, y = Yield)) + geom_point(aes(color = Field)) + geom_smooth(se = FALSE, method = "lm") + ggtitle("Sentinel-2")
+cor(yd_NDVI1_sen2$Yield, yd_NDVI1_sen2$NDVI_max)^2
+#uav
+NDVI1_uav <- aggregate(cen5mean_uav$ndvi, by = list(cen5mean_uav$Field), FUN = max)
+names(NDVI1_uav) <- c("Field", "NDVI_max")
+yd_NDVI1_uav <- merge(yd, NDVI1_uav, by = "Field")
+ggplot(yd_NDVI1_uav, aes(x = NDVI_max, y = Yield)) + geom_point(aes(color = Field)) + geom_smooth(se = FALSE, method = "lm") + ggtitle("UAV")
+cor(yd_NDVI1_uav$Yield, yd_NDVI1_uav$NDVI_max)^2
+
+```
+
