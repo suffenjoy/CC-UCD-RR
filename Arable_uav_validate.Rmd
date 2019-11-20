@@ -23,6 +23,10 @@ library(imputeTS)
 #read NDVI and CI from Arable daily data
 ```{r}
 path_arable <- "Z:/CC_UCD_atRR/data1/Arable"
+<<<<<<< HEAD
+=======
+path_arable <- ""
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 #daily
 arable_43_daily <- read.csv(file.path(path_arable, "A001574_daily.csv"))
 arable_44_daily <- read.csv(file.path(path_arable, "A002041_daily.csv"))
@@ -900,6 +904,7 @@ cen5mean_uav$Field <- ordered(cen5mean_uav$Field, levels = c("4-3", "4-4", "5-1"
 
 #-------------------------------------------
 #Canopy cover 
+<<<<<<< HEAD
 ##Ground truth from supervised classification
 ```{r}
 cc_class <- function(veg, shp){
@@ -968,63 +973,132 @@ class_20190822 <- raster(file.path(path_class, "Classification_20190822.tif"))
 
 classsum_20190523 <- read_class(class_20190523, Cen5_buff)
 names(classsum_20190523)[1:2] <- c("soil","veg")
+classsum_20190523$fruit <- 0
+classsum_20190523$flower <- 0
+
 classsum_20190530 <- read_class(class_20190530, Cen5_buff)
-names(classsum_20190530)[1:2] <- c("veg","soil")
+plot(class_20190530)
+unique(values(class_20190530))
+names(classsum_20190530)[1:2] <- c("soil","veg")
+classsum_20190530$fruit <- 0
+classsum_20190530$flower <- 0
+
 classsum_20190606 <- read_class(class_20190606, Cen5_buff)
+plot(class_20190606)
+unique(values(class_20190606))
 names(classsum_20190606)[1:2] <- c("soil","veg")
-classsum_20190626 <- read_class(class_20190626, Cen5_buff)
-names(classsum_20190626)[1:2] <- c("veg","soil")
+classsum_20190606$fruit <- 0
+classsum_20190606$flower <- 0
+
 classsum_20190614 <- read_class(class_20190614, Cen5_buff)
-names(classsum_20190614)[1:2] <- c("veg","soil")
+plot(class_20190614)
+unique(values(class_20190614))
+names(classsum_20190614)[1:2] <- c("soil","veg")
+classsum_20190614$fruit <- 0
+classsum_20190614$flower <- 0
+
 classsum_20190620 <- read_class(class_20190620, Cen5_buff)
-names(classsum_20190620)[1:2] <- c("veg","soil")
+plot(class_20190620)
+unique(values(class_20190620))
+names(classsum_20190620)[1:2] <- c("soil","veg")
+classsum_20190620$fruit <- 0
+classsum_20190620$flower <- 0
+
+classsum_20190626 <- read_class(class_20190626, Cen5_buff)
+plot(class_20190626)
+unique(values(class_20190626))
+names(classsum_20190626)[1:2] <- c("soil","veg")
+classsum_20190626$fruit <- 0
+classsum_20190626$flower <- 0
+
 classsum_20190703 <- read_class(class_20190703, Cen5_buff)
-names(classsum_20190703)[1:3] <- c("veg","flower","soil")
+plot(class_20190703)
+unique(values(class_20190703))
+names(classsum_20190703)[1:3] <- c("veg","soil","flower")
+classsum_20190703$fruit <- 0
+
 classsum_20190718 <- read_class(class_20190718, Cen5_buff)
-names(classsum_20190718)[1:3] <- c("veg","flower","soil")
+plot(class_20190718)
+unique(values(class_20190718))
+names(classsum_20190718)[1:3] <- c("soil","veg","flower")
+classsum_20190718$fruit <- 0
+
 classsum_20190725 <- read_class(class_20190725, Cen5_buff)
-names(classsum_20190725)[1:3] <- c("veg","flower","soil")
+names(classsum_20190725)[1:3] <- c("flower","soil","veg")
+classsum_20190725$fruit <- 0
+plot(class_20190725)
+unique(values(class_20190725))
+
 classsum_20190801 <- read_class(class_20190801, Cen5_buff)
-names(classsum_20190801)[1:4] <- c("veg","flower","soil","fruit")
+plot(class_20190801)
+unique(values(class_20190801))
+names(classsum_20190801)[1:4] <- c("soil","fruit","veg","flower")
+
 classsum_20190808 <- read_class(class_20190808, Cen5_buff)
+plot(class_20190808)
+unique(values(class_20190808))
 names(classsum_20190808)[1:4] <- c("veg","soil","flower","fruit")
+
 classsum_20190814 <- read_class(class_20190814, Cen5_buff)
+plot(class_20190814)
+unique(values(class_20190814))
 names(classsum_20190814)[1:3] <- c("veg","soil","fruit")
+classsum_20190814$flower <- 0
+
 classsum_20190822 <- read_class(class_20190822, Cen5_buff)
+plot(class_20190822)
+unique(values(class_20190822)) 
 names(classsum_20190822)[1:3] <- c("veg","soil","fruit")
-
-
-sapply(ls_classsum, function(x){x$total = apply(x[,sapply(x, is.numeric)])})
-
-
+classsum_20190822$flower <- 0
 
 
 
 #add dates 
-ccclass5_20190523$date <- as.Date("2019-05-23")
-ccclass5_20190530$date <- as.Date("2019-05-30")
-ccclass5_20190614$date <- as.Date("2019-06-14")
-ccclass5_20190620$date <- as.Date("2019-06-20")
-ccclass5_20190626$date <- as.Date("2019-06-26")
-ccclass5_20190703$date <- as.Date("2019-07-03")
-ccclass5_20190718$date <- as.Date("2019-07-18")
-#ccfield_20190725$date <- as.Date("2019-07-25")
-ccclass5_20190801$date <- as.Date("2019-08-01")
-ccclass5_20190808$date <- as.Date("2019-08-14")
-ccclass5_20190814$date <- as.Date("2019-08-14")
-ccclass5_20190822$date <- as.Date("2019-08-22")
+classsum_20190523$Date <- as.Date("2019-05-23")
+classsum_20190530$Date <- as.Date("2019-05-30")
+classsum_20190614$Date <- as.Date("2019-06-14")
+classsum_20190620$Date <- as.Date("2019-06-20")
+classsum_20190626$Date <- as.Date("2019-06-26")
+classsum_20190703$Date <- as.Date("2019-07-03")
+classsum_20190718$Date <- as.Date("2019-07-18")
+classsum_20190725$Date <- as.Date("2019-07-25")
+classsum_20190801$Date <- as.Date("2019-08-01")
+classsum_20190808$Date <- as.Date("2019-08-08")
+classsum_20190814$Date <- as.Date("2019-08-14")
+classsum_20190822$Date <- as.Date("2019-08-22")
 
-ccclass5_uav <- rbind(ccclass5_20190523, ccclass5_20190530,ccclass5_20190614,ccclass5_20190620, ccclass5_20190626, ccclass5_20190703, ccclass5_20190718,  ccclass5_20190801, ccclass5_20190808, ccclass5_20190814, ccclass5_20190822)
+
+#combine them
+classsum_uav <- rbind(classsum_20190523[c("veg","soil","flower","fruit","Field","Date")], classsum_20190530[c("veg","soil","flower","fruit","Field","Date")],classsum_20190614[c("veg","soil","flower","fruit","Field","Date")],classsum_20190620[c("veg","soil","flower","fruit","Field","Date")], classsum_20190626[c("veg","soil","flower","fruit","Field","Date")], classsum_20190703[c("veg","soil","flower","fruit","Field","Date")], classsum_20190718[c("veg","soil","flower","fruit","Field","Date")],  classsum_20190801[c("veg","soil","flower","fruit","Field","Date")], classsum_20190808[c("veg","soil","flower","fruit","Field","Date")], classsum_20190814[c("veg","soil","flower","fruit","Field","Date")], classsum_20190822[c("veg","soil","flower","fruit","Field","Date")])
 
 ```
+### calculate canopy cover 
+```{r}
+classsum_uav <- classsum_uav %>% mutate(total = veg+flower+soil+fruit)
+classsum_uav <- classsum_uav %>% mutate(canopy_cover = (total-soil)/total)
+classsum_uav <- classsum_uav %>% mutate(flower_cover = flower/total)
+classsum_uav <- classsum_uav %>% mutate(flofru_cover = (flower+fruit)/total)
+classsum_uav <- classsum_uav %>% mutate(fru_cover = fruit/total)
+
+```
+
 ###plot the canopy cover change
 ```{r}
-ggplot(ccclass5_uav, aes(x = date, y = cc, color = Field)) + geom_point() + geom_line() + ylab("Canopy Cover") + ggtitle("Canopy Cover Change") + xlab("Date") + scale_x_date(date_labels = "%m/%d", date_breaks = "2 weeks")
+ggplot(subset(classsum_uav, Field!="6-5"), aes(x = Date, y = canopy_cover, color = Field)) + geom_point() + geom_line() + ylab("Canopy Cover") + ggtitle("Canopy Cover Change") + xlab("Date") + scale_x_date(date_labels = "%m/%d", date_breaks = "2 weeks")
+
+ggplot(classsum_uav, aes(x = Date, y = flower_cover, color = Field)) + geom_point() + geom_line() + ylab("Flower Cover") + ggtitle("Flower Cover Change") + xlab("Date") + scale_x_date(date_labels = "%m/%d", date_breaks = "2 weeks")
+
+ggplot(classsum_uav, aes(x = Date, y = flofru_cover, color = Field)) + geom_point() + geom_line() + ylab("Flower & Fruit Cover") + ggtitle("Flower & Fruit Change") + xlab("Date") + scale_x_date(date_labels = "%m/%d", date_breaks = "2 weeks")
+
+ggplot(classsum_uav, aes(x = Date, y = fru_cover, color = Field)) + geom_point() + geom_line() + ylab("Red Fruit Cover") + ggtitle("Red Fruit Cover Change") + xlab("Date") + scale_x_date(date_labels = "%m/%d", date_breaks = "2 weeks") + xlim(c(as.Date("2019-08-01"),as.Date("2019-08-23")))
 
 ```
 
 ##NDVI-threshold based binary classification 
 ###Find vegetation where NDVI>0.5
+=======
+#calculate vegetation cover
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 ```{r}
 ndvi_threshold <- 0.5
 veg_20190523 <- calc(uav_20190523$ndvi, function(x){x[x<ndvi_threshold] <- NA; return(x)})
@@ -1056,7 +1130,11 @@ writeRaster(veg_20190822, file.path(path_output, "veg_20190822_ndvi0.5.tif"))
 
 ```
 
+<<<<<<< HEAD
 ###function
+=======
+##function
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 ```{r}
 #canopy cover 
 cc_extract <- function(veg, shp){
@@ -1068,7 +1146,11 @@ cc_extract <- function(veg, shp){
 
 
 ```
+<<<<<<< HEAD
 ###extraction with the fieldbound
+=======
+##extraction
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 ```{r}
 ccfield5_20190523 <- cc_extract(veg_20190523, FieldBounds5_buff)
 rm(veg_20190523)
@@ -1119,7 +1201,11 @@ ccfield5_uav$date <- as.Date(ccfield5_uav$date)
 ccfield5_uav$Field <- ordered(ccfield5_uav$Field , levels = c("4-3", "4-4", "5-1", "5-5", "6-5"))
 
 ```
+<<<<<<< HEAD
 ###extraction with the inner buffer from central points
+=======
+##extraction with the inner buffer from central points
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 ```{r}
 cccen5_20190523 <- cc_extract(veg_20190523, Cen5_buff)
 cccen5_20190530 <- cc_extract(veg_20190530, Cen5_buff)
@@ -1161,6 +1247,7 @@ cccen5_uav$Field <- ordered(cccen5_uav$Field , levels = c("4-3", "4-4", "5-1", "
 
 ```
 
+<<<<<<< HEAD
 
 #-----------------------------------------------
 #Number of fruit pixels 
@@ -1183,6 +1270,18 @@ blclass5_20190725 <- bl_class(class_20190725, Cen5_buff)
 
 ```
 
+=======
+##plot the canopy cover change
+```{r}
+ggplot(ccfield5_uav, aes(x = date, y = cc, color = Field)) + geom_point() + geom_line() + ylab("Canopy Cover") + ggtitle("Canopy Cover Change") + xlab("Date") + scale_x_date(date_labels = "%m/%d", date_breaks = "2 weeks")
+
+ggplot(cccen55_uav, aes(x = date, y = cc, color = Field)) + geom_point() + geom_line() + ylab("Canopy Cover") + ggtitle("Canopy Cover Change") + xlab("Date") + scale_x_date(date_labels = "%m/%d", date_breaks = "2 weeks")
+
+```
+
+#-----------------------------------------------
+#Number of fruit pixels 
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 ##read yield data
 ```{r}
 path_yield <- "Z:/CC_UCD_atRR/data2/GIS"
@@ -1221,6 +1320,7 @@ plot(subset(aracal_daily_sb, Field == "6-5")$date, subset(aracal_daily_sb, Field
 
 
 ```
+
 ###Excess yellow indices
 ```{r}
 #based on Bin's paper,
@@ -1574,12 +1674,18 @@ plot(subset(cen5mean_uav, Field == "4-4")$date, subset(cen5mean_uav, Field == "4
 ```{r}
 
 BLI_uav_20190703 <- (uav_20190703$red+uav_20190703$green)/uav_20190703$blue/((uav_20190703$green/uav_20190703$blue)*(uav_20190703$red-uav_20190703$blue+1))
+<<<<<<< HEAD
 BLI_uav_20190703[BLI_uav_20190703<(-100)] <-  NA
+=======
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 writeRaster(BLI_uav_20190703, file.path(path_output, "BLI_uav_20190703.tif"))
 rm(BLI_uav_20190703)
 
 BLI_uav_20190718 <- (uav_20190718$red+uav_20190718$green)/uav_20190718$blue/((uav_20190718$green/uav_20190718$blue)*(uav_20190718$red-uav_20190718$blue+1))
+<<<<<<< HEAD
 BLI_uav_20190718[BLI_uav_20190718<(-100)] <-  NA
+=======
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 writeRaster(BLI_uav_20190718, file.path(path_output, "BLI_uav_20190718.tif"))
 rm(BLI_uav_20190718)
 
@@ -1603,18 +1709,24 @@ FRI_uav_20190822 <- uav_20190822$red/uav_20190822$green/(uav_20190822$green/uav_
 writeRaster(FRI_uav_20190822, file.path(path_output, "FRI_uav_20190822.tif"))
 rm(FRI_uav_20190822)
 
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 sample1 <- read_uav(path_output, "RR_20190822_stacks2_Clip1.tif")
 FRI_sample1 <- sample1$red/sample1$green/(sample1$green/sample1$blue*(sample1$red-sample1$blue+1))
 writeRaster(FRI_sample1, file.path(path_output, "FRI_sample1.tif"))
 ```
+<<<<<<< HEAD
 ###Read BLI 
 ```{r}
 FRI_uav_20190801 <- raster(file.path(path_output,'FRI_uav_20190801.tif'))
 FRI_uav_20190801[FRI_uav_20190801< (-100)] <- NA 
 plot(FRI_uav_20190801)
 ```
+=======
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 
 
 ```{r}
@@ -1652,7 +1764,11 @@ names(cimis_daily_gdd) <- c("date", "device", "maxT", "meanT", "minT", "ET", "so
 #remove the last row
 cimis_daily_gdd <- na.omit(cimis_daily_gdd)
 cimis_daily_gdd$date <- as.Date(as.character(cimis_daily_gdd$date), "%m/%d/%Y")
+<<<<<<< HEAD
 cimis_daily_gdd <- subset(cimis_daily_gdd, date >= "2019-04-19")
+=======
+cimis_daily_gdd <- subset(cimis_daily_gdd, date >= "2019-04-30")
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 
 #calculate GDD
 gdd_tomato <- pollen::gdd(tmax = cimis_daily_gdd$maxT, tmin  = cimis_daily_gdd$minT, tbase  = 10, tbase_max = 30)
@@ -1660,6 +1776,152 @@ gdd_tomato <- data.frame("date"=cimis_daily_gdd$date, "GDD" = gdd_tomato)
 gdd_tomato$DOY <- lubridate::yday(gdd_tomato$date)
 ```
 
+<<<<<<< HEAD
+=======
+#For 11/15 presentation, use "5-1" as the example 
+##Aracal NDVI with UAV and Sentinel
+```{r}
+###Smoothed arable data
+ggplot(subset(aracal_daily_sb,Field =="5-1"), aes(x  = date, y = NDVI_ft, color = as.factor(1))) + geom_line(size = 0.75)  + ggtitle("NDVI from Arable Marks, UAV and Sentinel-2") + theme_light() + 
+  geom_point(data = subset(cen5mean_uav, Field == "5-1"), aes(x = date, y = ndvi, color =  as.factor(2)), shape = 19) + geom_line(data = subset(cen5mean_uav, Field == "5-1"), aes(x = date, y = ndvi, color =  as.factor(2)), linetype = "longdash") + 
+  ylim(0.5,0.9) + 
+  geom_point(data = subset(Cen5mean_sen2,Field == "5-1"), aes(x = Date, y = NDVI, color = as.factor(3)), shape = 17) + geom_line(data = subset(Cen5mean_sen2,Field == "5-1"), aes(x = Date, y = NDVI, color = as.factor(3)), linetype = "dotted") 
+
+
+#NDVI
+ggplot(subset(cen5mean_uav,Field =="5-1"), aes(x  = date, y = ndvi, color = as.factor(1))) + geom_line( linetype = "longdash")  + ggtitle("NDVI from Arable Marks, UAV and Sentinel-2") +geom_point(shape = 19)+ theme_light() + 
+  geom_line(data = subset(aracal_daily_sb, Field == "5-1"), aes(x = date, y = NDVI_ft, color =  as.factor(2))) + 
+  ylim(0,0.9) + 
+  geom_point(data = subset(Cen5mean_sen2,Field == "5-1"), aes(x = Date, y = NDVI, color = as.factor(3)), shape = 17) + geom_line(data = subset(Cen5mean_sen2,Field == "5-1"), aes(x = Date, y = NDVI, color = as.factor(3)), linetype = "dotted") + xlim(as.Date("2019-05-23"),as.Date("2019-09-01")) + ylab("NDVI") + 
+  geom_point(data = subset(Cen5mean_pl_clean, Field == "5-1"), aes(x = Date, y = NDVI, color = as.factor(4)), shape = 15) + geom_line(data = subset(Cen5mean_pl_clean, Field == "5-1"), aes(x = Date, y = NDVI, color = as.factor(4)), linetype = "dotdash")
+
+
+
+```
+
+##All remote sensing data combined
+```{r}
+df_all <- data.frame()
+
+#arable
+temp <- aracal_daily_sb[,c("Field","date","b1r","b2r","b4r","b6r","NDVI_ft","BLI2","FRI1")]
+names(temp) <- c("Field","Date","blue", "green", "red", "nir", "ndvi","bli","fri")
+temp$Instrument <- "Arable"
+df_all <- rbind(df_all, temp)
+head(df_all)
+
+#uav
+names(cen5mean_uav)
+temp <- cen5mean_uav[,c("Field","date","blue", "green", "red", "nir", "ndvi","BLI2","FRI1")]
+names(temp) <- c("Field","Date","blue", "green", "red", "nir", "ndvi","bli","fri")
+temp$Instrument <- "UAV"
+df_all <- rbind(df_all, temp)
+
+#sentinel
+names(Cen5mean_sen2)
+temp <- Cen5mean_sen2[,c("Field","Date","B2","B3","B4","B8","NDVI","BLI2","FRI1")]
+names(temp) <-  c("Field","Date","blue", "green", "red", "nir", "ndvi","bli","fri")
+temp$Instrument <- "Sentinel2"
+df_all <- rbind(df_all, temp)
+
+#Planetscope
+names(Cen5mean_pl_clean)
+temp <- Cen5mean_pl_clean[,c("Field","Date","B1","B2","B3","B4","NDVI","BLI2","FRI1")]
+names(temp) <- c("Field","Date","blue", "green", "red", "nir", "ndvi","bli","fri")
+temp$Instrument <- "Planetscope"
+df_all <- rbind(df_all, temp)
+
+#merge with clssification method
+df_all <- merge(df_all, classsum_uav, by = c("Date","Field"), all.x = TRUE)
+
+```
+
+##calculate some other indices 
+```{r}
+df_all <- df_all %>% mutate(soil_sig = red-blue+1)
+df_all <- df_all %>% mutate(soil_ind = (red+blue-green)/(red+blue+green))
+df_all <- df_all %>% mutate(vari = (green-red)/(green+red-blue))
+df_all <- df_all %>% mutate(vari.green = (green-red)/(green+red))
+
+```
+
+##Plots!!!
+###Canopy Cover and VIs
+```{r}
+ggplot(subset(df_all,Instrument=="UAV" & Date <= "2019-07-18"), aes(y = ndvi, x = canopy_cover)) + geom_point(aes(color = Field)) + xlab("Canopy Coverage") + ylab("NDVI") + geom_smooth(method = "lm", se = FALSE) + ggtitle("Data from UAV")
+cor(subset(df_all,Instrument=="UAV" & Date <= "2019-07-18")$canopy_cover, subset(df_all,Instrument=="UAV" & Date <= "2019-07-18")$ndvi)^2
+
+ggplot(subset(df_all,Instrument=="Arable" & Date <= "2019-07-18"), aes(y = ndvi, x = canopy_cover)) + geom_point(aes(color = Field)) + xlab("Canopy Coverage") + ylab("NDVI") + geom_smooth(method = "lm", se = FALSE) + ggtitle("Data from Arable")
+cor(subset(df_all,Instrument=="Arable" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Arable" & Date <= "2019-07-18")$vari.green, use = "complete.obs")^2
+
+ggplot(subset(df_all,Instrument=="Planetscope" & Date <= "2019-07-18"), aes(y = ndvi, x = canopy_cover)) + geom_point(aes(color = Field)) + xlab("Canopy Coverage") + ylab("NDVI") + geom_smooth(method = "lm", se = FALSE) + ggtitle("Data from Planetscope")
+cor(subset(df_all,Instrument=="Planetscope" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Planetscope" & Date <= "2019-07-18")$vari.green, use = "complete.obs")^2
+
+ggplot(subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18"), aes(y = ndvi, x = canopy_cover)) + geom_point(aes(color = Field)) + xlab("Canopy Coverage") + ylab("NDVI") + geom_smooth(method = "lm", se = FALSE) + ggtitle("Data from Sentinel2") 
+cor(subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$vari.green, use = "complete.obs")^2
+
+cor(subset(df_all,Instrument=="Arable" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Arable" & Date <= "2019-07-18")$vari, use = "complete.obs")^2
+
+cor(subset(df_all,Instrument=="Arable" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Arable" & Date <= "2019-07-18")$ndvi, use = "complete.obs")^2
+
+cor(subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$ndvi, use = "complete.obs")^2
+
+cor(subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$vari, use = "complete.obs")^2
+
+cor(subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$vari.green, use = "complete.obs")^2
+
+cor(subset(df_all,Instrument=="Planetscope" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Planetscope" & Date <= "2019-07-18")$vari.green, use = "complete.obs")^2
+
+cor(subset(df_all,Instrument=="Planetscope" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Planetscope" & Date <= "2019-07-18")$vari, use = "complete.obs")^2
+
+cor(subset(df_all,Instrument=="Planetscope" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Planetscope" & Date <= "2019-07-18")$ndvi, use = "complete.obs")^2
+
+cor(subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$canopy_cover,subset(df_all,Instrument=="Sentinel2" & Date <= "2019-07-18")$vari.green, use = "complete.obs")^2
+
+```
+###soil signature
+```{r}
+ggplot(subset(df_all, Instrument=="UAV"), aes(x = Date, y = soil_sig, color = Field)) + geom_point() + geom_line() + ggtitle("Data from UAV")
+
+ggplot(subset(df_all, Instrument=="Arable"& Field!="4-3" ), aes(x = Date, y = soil_sig, color = Field)) + geom_point() + geom_line() + ggtitle("Data from Arable")
+
+ggplot(subset(df_all, Instrument=="Planetscope"), aes(x = Date, y = soil_sig, color = Field)) + geom_point() + geom_line() + ggtitle("Data from Planetscope")
+ggplot(subset(df_all, Instrument=="Sentinel2"), aes(x = Date, y = soil_sig, color = Field)) + geom_point() + geom_line() + ggtitle("Data from Sentinel2")
+
+#BARE SOIL INDICES
+ggplot(subset(df_all, Instrument=="UAV"), aes(x = Date, y = soil_ind, color = Field)) + geom_point() + geom_line() + ggtitle("Data from UAV")
+ggplot(subset(df_all, Instrument=="Arable"), aes(x = Date, y = soil_ind, color = Field)) + geom_point() + geom_line() + ggtitle("Data from Arable")
+ggplot(subset(df_all, Instrument=="Planetscope"), aes(x = Date, y = soil_ind, color = Field)) + geom_point() + geom_line() + ggtitle("Data from Planetscope")
+ggplot(subset(df_all, Instrument=="Sentinel2"), aes(x = Date, y = soil_ind, color = Field)) + geom_point() + geom_line() + ggtitle("Data from Sentinel2")
+
+```
+##Fruit Indices
+```{r}
+#time serise
+ggplot(subset(df_all, Instrument=="UAV" & Date >= "2019-07-03"), aes(x = Date, y = fru_cover, color = Field)) + geom_point() + geom_line() + ggtitle("Fruit Cover") + ylab("Fruit Cover")
+
+ggplot(subset(df_all, Instrument=="UAV" & Date >= "2019-07-03"), aes(x = Date, y = fri, color = Field)) + geom_point() + geom_line() + ggtitle("Data from UAV") + ylab("Enhanced Fruit Index")+ xlim(c(as.Date("2019-07-01"), as.Date("2019-08-30"))) + ylim(0.25,1.3)
+
+ggplot(subset(df_all, Instrument=="Sentinel2" & Date >= "2019-06-30" & Date <= "2019-08-30"), aes(x = Date, y = fri, color = Field)) + geom_point() + geom_line() + ggtitle("Data from Sentinel2") + ylab("Enhanced Fruit Index") + xlim(c(as.Date("2019-07-01"), as.Date("2019-08-30")))+ylim(0.25,1.3)
+
+#corelation
+cor(subset(df_all, Instrument=="UAV" & Date >= "2019-07-03")$fru_cover, subset(df_all, Instrument=="UAV" & Date >= "2019-07-03")$bli)^2
+cor(subset(df_all, Instrument=="Sentinel2" & Date >= "2019-07-03")$fru_cover, subset(df_all, Instrument=="Sentinel2" & Date >= "2019-07-03")$bli, use = "complete.obs")^2
+cor(subset(df_all, Instrument=="Planetscope" & Date >= "2019-07-03")$fru_cover, subset(df_all, Instrument=="Planetscope" & Date >= "2019-07-03")$bli, use = "complete.obs")^2
+
+#correlation plot 
+ggplot(subset(df_all, Instrument=="Planetscope" & Date >= "2019-07-03"), aes(x = fru_cover, y= fri)) + geom_point(aes(color = Field)) + geom_smooth(method = "lm", se = FALSE) 
+
+ggplot(subset(df_all, Instrument=="Sentinel2" & Date >= "2019-07-03"), aes(x = fru_cover, y= fri)) + geom_point(aes(color = Field)) + geom_smooth(method = "lm", se = FALSE) 
+
+ggplot(subset(df_all, Instrument=="UAV" & Date >= "2019-07-03"), aes(x = fru_cover, y= fri)) + geom_point(aes(color = Field)) + geom_smooth(method = "lm", se = FALSE) 
+
+ggplot(subset(df_all, Instrument=="Planetscope" & Date >= "2019-07-03"), aes(x = fru_cover, y = fri, color = Field)) + geom_point() + geom_line() + ggtitle("Data from Planetscope") + ylab("Enhanced Fruit Index")
+
+
+```
+
+>>>>>>> cf279c30d7d84052169cb524ad793f422f0f26fe
 
 #Yield data
 ##with Fruit Index
